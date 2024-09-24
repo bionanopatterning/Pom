@@ -1,0 +1,5 @@
+Ais-cryoET>=1.0.37
+openpyxl
+pandas
+streamlit
+streamlit-aggrid
