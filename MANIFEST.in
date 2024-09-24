@@ -1,0 +1,2 @@
+recursive-include Pom/models/*.py
+recursive-include Pom/core/*.json

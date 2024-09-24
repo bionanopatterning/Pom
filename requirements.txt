@@ -1,0 +1,8 @@
+Ais-cryoET>=1.0.37
+mrcfile>=1.5.3
+numpy<2.0
+tifffile>=2024.8.30
+openpyxl
+pandas
+streamlit
+streamlit-aggrid
