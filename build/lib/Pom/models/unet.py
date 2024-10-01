@@ -1,6 +1,6 @@
 import tensorflow as tf
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, Conv2DTranspose, BatchNormalization
+from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, Conv2DTranspose, BatchNormalization, concatenate, Activation, Multiply, add
 from tensorflow.keras.optimizers import Adam
 
 
@@ -20,9 +20,21 @@ def combined_loss(y_true, y_pred):
     return cce + d_loss
 
 
+def attention_block(x, gating, inter_channels):
+    theta_x = Conv2D(inter_channels, (1, 1), strides=(1, 1), padding='same')(x)
+    phi_g = Conv2D(inter_channels, (1, 1), strides=(1, 1), padding='same')(gating)
+    add_xg = add([theta_x, phi_g])
+    act_xg = Activation('relu')(add_xg)
+    psi = Conv2D(1, (1, 1), strides=(1, 1), padding='same')(act_xg)
+    sigmoid_psi = Activation('sigmoid')(psi)
+    attn_out = Multiply()([x, sigmoid_psi])
+    return attn_out
+
+
 def create_model(input_shape, output_dimensionality):
     inputs = Input(input_shape)
 
+    # Encoder
     # Block 1
     conv1 = Conv2D(64, (3, 3), activation='relu', padding='same')(inputs)
     conv1 = BatchNormalization()(conv1)
@@ -57,9 +69,11 @@ def create_model(input_shape, output_dimensionality):
     conv5 = Conv2D(1024, (3, 3), activation='relu', padding='same')(conv5)
     conv5 = BatchNormalization()(conv5)
 
+    # Decoder
     # Up Block 1
     up6 = Conv2DTranspose(512, (2, 2), strides=(2, 2), padding='same')(conv5)
-    merge6 = concatenate([up6, conv4], axis=3)
+    attn_6 = attention_block(conv4, up6, inter_channels=256)
+    merge6 = concatenate([up6, attn_6], axis=3)
     conv6 = Conv2D(512, (3, 3), activation='relu', padding='same')(merge6)
     conv6 = BatchNormalization()(conv6)
     conv6 = Conv2D(512, (3, 3), activation='relu', padding='same')(conv6)
@@ -67,7 +81,8 @@ def create_model(input_shape, output_dimensionality):
 
     # Up Block 2
     up7 = Conv2DTranspose(256, (2, 2), strides=(2, 2), padding='same')(conv6)
-    merge7 = concatenate([up7, conv3], axis=3)
+    attn_7 = attention_block(conv3, up7, inter_channels=128)
+    merge7 = concatenate([up7, attn_7], axis=3)
     conv7 = Conv2D(256, (3, 3), activation='relu', padding='same')(merge7)
     conv7 = BatchNormalization()(conv7)
     conv7 = Conv2D(256, (3, 3), activation='relu', padding='same')(conv7)
@@ -75,7 +90,8 @@ def create_model(input_shape, output_dimensionality):
 
     # Up Block 3
     up8 = Conv2DTranspose(128, (2, 2), strides=(2, 2), padding='same')(conv7)
-    merge8 = concatenate([up8, conv2], axis=3)
+    attn_8 = attention_block(conv2, up8, inter_channels=64)
+    merge8 = concatenate([up8, attn_8], axis=3)
     conv8 = Conv2D(128, (3, 3), activation='relu', padding='same')(merge8)
     conv8 = BatchNormalization()(conv8)
     conv8 = Conv2D(128, (3, 3), activation='relu', padding='same')(conv8)
@@ -83,19 +99,16 @@ def create_model(input_shape, output_dimensionality):
 
     # Up Block 4
     up9 = Conv2DTranspose(64, (2, 2), strides=(2, 2), padding='same')(conv8)
-    merge9 = concatenate([up9, conv1], axis=3)
+    attn_9 = attention_block(conv1, up9, inter_channels=32)
+    merge9 = concatenate([up9, attn_9], axis=3)
     conv9 = Conv2D(64, (3, 3), activation='relu', padding='same')(merge9)
     conv9 = BatchNormalization()(conv9)
     conv9 = Conv2D(64, (3, 3), activation='relu', padding='same')(conv9)
     conv9 = BatchNormalization()(conv9)
 
-    # Output Layer
     output = Conv2D(output_dimensionality, (1, 1), activation='softmax')(conv9)
 
-    # Create the model
     model = Model(inputs=[inputs], outputs=[output])
-
-    # Compile the model with a suitable optimizer and loss function
-    model.compile(optimizer=Adam(learning_rate=5e-4), loss=combined_loss, metrics=['accuracy'])
+    model.compile(optimizer=Adam(learning_rate=3e-5), loss=combined_loss, metrics=['accuracy'])
 
     return model

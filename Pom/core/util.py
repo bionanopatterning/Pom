@@ -3,8 +3,12 @@ import numpy as np
 
 def image_to_boxes(image, boxsize=128, overlap=0.5, normalize=None):
     w, h = image.shape[0:2]
-    pad_w = boxsize - (w % boxsize)
-    pad_h = boxsize - (h % boxsize)
+    pad_w = 0
+    pad_h = 0
+    if not boxsize == w:
+        pad_w = boxsize - (w % boxsize)
+    if not boxsize == h:
+        pad_h = boxsize - (h % boxsize)
     stride = int(boxsize * (1.0 - overlap))
     boxes = list()
     image = np.pad(image, ((0, pad_w), (0, pad_h), (0, 0)), mode='symmetric')

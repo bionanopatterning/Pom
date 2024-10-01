@@ -3,7 +3,6 @@ setup.py
 Pom/__init__.py
 Pom/main.py
 Pom/project_configuration.json
-Pom/render_configuration.json
 Pom.egg-info/PKG-INFO
 Pom.egg-info/SOURCES.txt
 Pom.egg-info/dependency_links.txt
@@ -13,8 +12,8 @@ Pom.egg-info/top_level.txt
 Pom/app/Introduction.py
 Pom/app/__init__.py
 Pom/app/pages/2_Results_table.py
-Pom/app/pages/3_Methods.py
-Pom/app/pages/4_Tomogram details.py
+Pom/app/pages/3_Gallery.py
+Pom/app/pages/4_Browse tomograms.py
 Pom/app/pages/__init__.py
 Pom/core/__init__.py
 Pom/core/cli_fn.py
@@ -25,8 +24,11 @@ Pom/core/render.py
 Pom/core/render_configuration.json
 Pom/core/util.py
 Pom/models/__init__.py
+Pom/models/original_unet.py
 Pom/models/unet.py
 Pom/models/vggnet.py
 Pom/shaders/__init__.py
 Pom/shaders/se_depth_edge_detect.glsl
+Pom/shaders/se_depth_mask_shader.glsl
+Pom/shaders/se_overlay_ray_trace_shader.glsl
 Pom/shaders/se_surface_model_shader.glsl

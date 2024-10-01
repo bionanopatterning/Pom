@@ -1,4 +1,3 @@
 {
-  "Top3": ["rank1", "rank2", "rank3", "!Unknown"],
-  "Macromolecules": ["Membrane", "Ribosome", "ATP synthase", "RuBisCo"]
+  "Test": ["Membrane", "rank1"]
 }

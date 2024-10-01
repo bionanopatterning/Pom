@@ -1,57 +1,25 @@
 import streamlit as st
-import json
-import os
 import copy
-from PIL import Image
 import pandas as pd
-import numpy as np
-from Pom.core.render import parse_feature_library, FeatureLibraryFeature
-import matplotlib.pyplot as plt
+from Pom.core.config import *
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 from matplotlib import colors
+
 
 st.set_page_config(
     page_title="Results table",
     layout='wide'
 )
 
-with open("C:/Users/mgflast/PycharmProjects/ontoseg/project_configuration.json", 'r') as f:
-    project_configuration = json.load(f)
-
-
-feature_library = parse_feature_library("C:/Users/mgflast/.Ais/feature_library.txt")
 df = pd.read_excel(os.path.join(project_configuration["root"], "summary.xlsx"), index_col=0)
 df = df.dropna(axis=0)
 
 
-with open("C:/Users/mgflast/PycharmProjects/ontoseg/project_configuration.json", 'r') as f:
-    project_configuration = json.load(f)
-
-
-def get_image(tomo, image):
-    img_path = os.path.join(project_configuration["root"], project_configuration["image_dir"], image, f"{tomo}_bin2_{image}.png")
-    if os.path.exists(img_path):
-        return Image.open(img_path)
-    else:
-        return Image.fromarray(np.zeros((128, 128)), mode='L')
-
-
-def recolor(color, style=0):
-    if style == 0:
-        return (np.array(color) / 2.0 + 0.5)
-    if style == 1:
-        return (np.array(color) / 8 + 0.875)
-    else:
-        return color
-
-
-
 copy_df = copy.deepcopy(df)
 copy_df = copy_df.reset_index()
-copy_df.rename(columns={'tomogram': 'Tomogram'}, inplace=True)
 copy_df = copy_df.round(1)
-columns = copy_df.columns
-for o in project_configuration["soft_ignore_in_summary"]:
+columns = list(copy_df.columns)
+for o in project_configuration["soft_ignore_in_summary"] + project_configuration["macromolecules"]:
     if o in columns:
         columns.remove(o)
         columns.append(o)
@@ -67,7 +35,7 @@ for k in copy_df.columns:
 
 
 st.title("Dataset summary")
-n_ontologies = len(project_configuration["ontologies"]) + 1
+n_ontologies = len([o for o in project_configuration["ontologies"] if o != "_"]) + 1
 n_macromolecules = len(project_configuration["macromolecules"])
 if "Density" in project_configuration["macromolecules"]:
     n_macromolecules -= 1
@@ -80,6 +48,7 @@ if search_query:
 else:
     filtered_df = copy_df
 
+
 numerical_columns = filtered_df.select_dtypes(include=[np.number]).columns.tolist()
 
 # Create a layout with columns to make sliders more compact
@@ -89,9 +58,10 @@ with st.expander(label="Filters"):
     cols = st.columns(n_sliders_per_row)
 
     for idx, col in enumerate(numerical_columns):
-        min_val = float(df[col].min())
-        max_val = float(df[col].max())
-        print(min_val, max_val)
+        min_val = float(copy_df[col].min())
+        max_val = float(copy_df[col].max())
+        if max_val <= min_val:
+            max_val = min_val + 0.1
         col_idx = idx % n_sliders_per_row  # Choose column for slider
         with cols[col_idx]:  # Add slider in the appropriate column
             slider_filters[col] = st.slider(f"{col}", min_val, max_val, (min_val, max_val))
@@ -100,29 +70,28 @@ with st.expander(label="Filters"):
     for col, (min_val, max_val) in slider_filters.items():
         filtered_df = filtered_df[(filtered_df[col] >= min_val) & (filtered_df[col] <= max_val)]
 
-
-    # Create AgGrid options
-    gb = GridOptionsBuilder.from_dataframe(filtered_df)
-    gb.configure_pagination(enabled=True, paginationPageSize=50)
-    gb.configure_selection('single', use_checkbox=False)  # Allow single row selection
-    gb.configure_column('Tomogram', header_name="Tomogram", pinned=True,
-                        cellRenderer=JsCode(
-                            """
-                            class UrlCellRenderer {
-                              init(params) {
-                                this.eGui = document.createElement('a');
-                                this.eGui.innerText = params.value;
-                                this.eGui.setAttribute('href', '/Tomogram_details?tomo_id=' + params.value);
-                                this.eGui.setAttribute('style', "text-decoration:none");
-                                this.eGui.setAttribute('target', "_blank");
-                              }
-                              getGui() {
-                                return this.eGui;
-                              }
-                            }
-                            """
-                        ),
-                        )
+# Create AgGrid options
+gb = GridOptionsBuilder.from_dataframe(filtered_df)
+gb.configure_pagination(enabled=True, paginationPageSize=50)
+gb.configure_selection('single', use_checkbox=False)  # Allow single row selection
+gb.configure_column('Tomogram', header_name="Tomogram", pinned=True,
+                    cellRenderer=JsCode(
+                        """
+                        class UrlCellRenderer {
+                          init(params) {
+                            this.eGui = document.createElement('a');
+                            this.eGui.innerText = params.value;
+                            this.eGui.setAttribute('href', '/Browse_tomograms?tomo_id=' + params.value);
+                            this.eGui.setAttribute('style', "text-decoration:none");
+                            this.eGui.setAttribute('target', "_blank");
+                          }
+                          getGui() {
+                            return this.eGui;
+                          }
+                        }
+                        """
+                    ),
+                    )
 
 for k in column_colors:
     if k == "Tomogram":
@@ -138,7 +107,7 @@ grid_response = AgGrid(
     filtered_df,
     gridOptions=grid_options,
     update_mode=GridUpdateMode.SELECTION_CHANGED,
-    height=600,
+    height=900,
     theme="streamlit",
     allow_unsafe_jscode=True,  # Allow HTML rendering for clickable links
 )

@@ -1,2 +1,3 @@
 recursive-include Pom/models/*.py
 recursive-include Pom/core/*.json
+recursive-include Pom/shaders/*.glsl

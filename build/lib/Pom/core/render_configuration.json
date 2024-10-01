@@ -1,4 +1,4 @@
 {
-  "example_composition_a": ["Ribosome", "Membrane", "Density"],
-  "example_composition_b": ["Cytoplasm", "Mitochondrion"]
+  "Macromolecules": ["Ribosome", "Membrane", "Density", "ATP synthase", "RuBisCo"],
+  "Top3": ["rank1", "rank2", "rank3", "!Unknown"]
 }

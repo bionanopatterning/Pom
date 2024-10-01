@@ -55,12 +55,12 @@ void main()
 
         vec3 diffuse = max(0.0, dot(normalize(fnormal), lightDir)) * F_DIFFUSE * lightColour * color.rgb;
 
-        vec3 viewDir = normalize(gl_FragCoord.xyz);
+        vec3 localViewDir = normalize(gl_FragCoord.xyz);
         vec3 reflDir = reflect(-lightDir, fnormal);
-        float specIntensity = pow(min(1.0, max(dot(viewDir, reflDir), 0.0)), SPEC_POWER);
+        float specIntensity = pow(min(1.0, max(dot(localViewDir, reflDir), 0.0)), SPEC_POWER);
         vec3 specular = F_SPECULAR * specIntensity * vec3(1.0, 1.0, 1.0);
 
-        vec3 emissive = dot(normalize(fnormal), viewDir) * F_EMISSIVE * color.rgb;
+        vec3 emissive = dot(normalize(fnormal), localViewDir) * F_EMISSIVE * color.rgb;
         fragColour = vec4(ambient + diffuse + specular + emissive, color.a);
     }
     else if (style == 2) // Flat
