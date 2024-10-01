@@ -102,4 +102,4 @@ if __name__ == "__main__":
     #     cli_fn.project_configuration = config
     # feature_library_path = os.path.join(os.path.expanduser("~"), ".Ais", "feature_library.txt")
     #
-    cli_fn.phase_3_render("C:/Users/mgflast/PycharmProjects/ontoseg/render_configuration.json")
+    cli_fn.phase_3_render("C:/Users/mart_/PycharmProjects/Pom/render_configuration.json")

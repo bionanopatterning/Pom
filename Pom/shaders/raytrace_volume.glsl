@@ -1,18 +1,21 @@
 #compute
 #version 430
 
-layout(binding = 0) uniform sampler2D overlay;
+layout(binding = 0) uniform sampler3D volume;
 layout(binding = 1) uniform sampler2D depth_start;
 layout(binding = 2) uniform sampler2D depth_stop;
-layout(binding = 3, rgba32f) writeonly uniform image2D target;
+layout(binding = 3, rgba32f) uniform image2D target;
 layout(local_size_x = 16, local_size_y=16) in;
 
 uniform mat4 ipMat;
 uniform mat4 ivMat;
 uniform mat4 pMat;
-uniform mat4 vMat;
 uniform vec2 viewportSize;
 uniform float pixelSize;
+uniform int Z;
+uniform int Y;
+uniform int X;
+uniform vec3 C;
 
 uniform float near;
 uniform float far;
@@ -43,6 +46,7 @@ void main()
     vec3 start_pos = (ivMat * cs_start).xyz;
     vec3 stop_pos = (ivMat * cs_stop).xyz;
     vec3 dir = normalize(stop_pos - start_pos);
+    vec3 volume_size = vec3(X, Y, Z);
 
     if (z_start == 1.0f)
     {
@@ -51,14 +55,12 @@ void main()
     else
     {
         vec3 pos = start_pos;
-        vec2 uv;
-        vec4 rayValue = vec4(0.0f);
-        bool rayInVolume = true;
+        vec3 uvw;
+        vec3 imgSize = vec3(X, Y, Z);
+        float rayValue = 0.0f;
         float pathLength = 0.0;
-        float stepLength = length(dir);
-        int MAX_ITER = 10000;
+        int MAX_ITER = 1000;
         float i = 0.0f;
-        bool threshold_reached = false;
         while (i < MAX_ITER)
         {
             i += 1.0f;
@@ -67,11 +69,13 @@ void main()
                 break;
             }
             pos += dir;
-            uv = pos.xy / imgSize / pixelSize + 0.5f;
-            rayValue += texture(overlay, uv) * 2.0f;
+            uvw = pos.xyz / imgSize / pixelSize + 0.5f;
+            rayValue += texture(volume, uvw).r;
         }
         // Write to texture.
-        float norm_fac_final = style == 0 ? 1 / 500.0f : 1 / 500.0f;
-        imageStore(target, px, vec4(rayValue.xyz * norm_fac_final, 1.0f));
+        vec3 rayColour = C * rayValue / 500.0;
+        vec3 pixelColour = imageLoad(target, px).rgb;
+        imageStore(target, px, vec4(pixelColour + rayColour, 1.0));
+
     }
 }
