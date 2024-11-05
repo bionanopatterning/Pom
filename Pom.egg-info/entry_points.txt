@@ -1,3 +1,0 @@
-[console_scripts]
-pom = Pom.main:main
-
