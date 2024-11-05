@@ -67,7 +67,7 @@ class FeatureLibraryFeature:
         self.title = "New feature"
         self.colour = FeatureLibraryFeature.DEFAULT_COLOURS[FeatureLibraryFeature.CLR_COUNTER % len(FeatureLibraryFeature.DEFAULT_COLOURS)]
         self.box_size = 64
-        self.brush_size = 10.0 # nm
+        self.brush_size = 10.0  # nm
         self.alpha = 1.0
         self.use = True
         self.dust = 1.0

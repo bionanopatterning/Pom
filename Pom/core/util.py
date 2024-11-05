@@ -60,3 +60,5 @@ def bin_img(A, b=2):
     i, j = A.shape
     return A[:i//b * b, :j//b * b].reshape((i//b, b, j//b, b)).mean(3).mean(1)
 
+
+

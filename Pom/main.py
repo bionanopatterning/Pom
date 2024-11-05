@@ -29,6 +29,7 @@ def main():
     p1sp_train = p1sp.add_parser('train', help='Train a single-ontology output model for a selected ontology.')
     p1sp_train.add_argument('-ontology', required=True, help='The ontology for which to train a network.')
     p1sp_train.add_argument('-gpus', required=False, help='Which GPUs to use, e.g. "0,1,2,3" for GPU 0-3. If used, overrides the GPU usage set in the project configuration.')
+    #p1sp_train.add_argument('-split', required=False, default=0.0, help='Validation split size (default is no split applied; 0.1 = 10%, 0.2 = 20%, etc.).')
 
     p1sp_test = p1sp.add_parser('test', help='Test a single-ontology output model for a selected ontology.')
     p1sp_test.add_argument('-ontology', required=True, help='The ontology for which to test the trained network.')
@@ -37,25 +38,28 @@ def main():
     # Shared model commands
     p2p = subparsers.add_parser('shared', help='Initialize, train, or launch phase2 combined models.')
     p2sp = p2p.add_subparsers(dest='phase2_command', help='Shared-model commands')
-    p2sp_init = p2sp.add_parser('initialize', help='Train a single model to output all configured ontologies.')
+    p2sp_init = p2sp.add_parser('initialize', help='Compile the training data for the shared model.')
     p2sp_init.add_argument('-selective', required=False, default=0, help='Whether to use all original training data or only those images where there is an annotation (and not negative training images), for use in the joint training dataset.')
 
     p2sp_train = p2sp.add_parser('train', help='Train a single model to output all configured ontologies.')
     p2sp_train.add_argument('-gpus', required=False, help='Which GPUs to use, e.g. "0,1,2,3" for GPU 0-3. If used, overrides the GPU usage set in the project configuration.')
+    p2sp_train.add_argument('-checkpoint', required=False, default='', help="If used, continue training the model at <path> argument of -checkpoint.")
+    #p2sp_train.add_argument('-split', required=False, default=0.0, help='Validation split size (default is no split applied; 0.1 = 10%, 0.2 = 20%, etc.).')
 
     p2sp_process = p2sp.add_parser('process', help='Process all tomograms with the shared model.')
     p2sp_process.add_argument('-gpus', required=False, help='Which GPUs to use, e.g. "0,1,2,3" for GPU 0-3. If used, overrides the GPU usage set in the project configuration.')
 
-    # Analysis ocmmands
+    # Analysis commands
     p3p = subparsers.add_parser('summarize', help='Summarize the dataset (or the fraction of the dataset processed so-far) in an Excel file.')
     p3p.add_argument('-overwrite', required=False, default=0, help='Specify whether to re-analyze volumes for which values are already found in the previous summary. Default is 0 (do not overwrite).')
+    p3p.add_argument('-skip', '--skip-macromolecules', required=False, default=0, help='Specify whether to re-analyze volumes for which values are already found in the previous summary. Default is 0 (do not overwrite).')
 
     p4p = subparsers.add_parser('render', help='Render segmentations and output .png files.')
     p4p.add_argument('-c', '--configuration', required=False, default="", help='Path to a .json configuration file that specifies named compositions to render for each tomogram. If not supplied, default compositions are the top 3 ontologies and all macromolecules. ')
     p4p.add_argument('-n', '--max_number', required=False, default=-1, help='Specify a maximum number of tomograms to render images for (e.g. when testing settings)')
     p4p.add_argument('-f', '--feature-library-path', required=False, default=None, help='Path to an Ais feature library to define rendering parameters. If none supplied, it is taken from the Ais installation directory, if possible')
     p4p.add_argument('-t', '--tomogram', required=False, default='', help='Optional: path to a specific tomogram filename to render segmentations for. Overrides -n argument.')
-    p4p.add_argument('-o', '--overwrite', required=False, default=0, help='Set to 1 to overwrite previously rendered images with the same render configuration. Default is 0.')
+    p4p.add_argument('-o', '--overwrite', required=False, default=0, help='Set to 1 to overwrite previously rendered images. Default is 0.')
     p4p.add_argument('-p', '--processes', required=False, default=1, help='Number of parallel processing Renderer instances.')
 
     subparsers.add_parser('browse', help='Launch a local streamlit app to browse the summarized dataset.')
@@ -79,12 +83,12 @@ def main():
             cli_fn.phase_2_initialize(selective=args.selective)
         elif args.phase2_command == "train":
             gpus = cfg.project_configuration["GPUS"] if not args.gpus else args.gpus
-            cli_fn.phase_2_train(gpus)
+            cli_fn.phase_2_train(gpus, checkpoint=args.checkpoint)
         elif args.phase2_command == "process":
             gpus = cfg.project_configuration["GPUS"] if not args.gpus else args.gpus
             cli_fn.phase_2_process(gpus)
     elif args.command == 'summarize':
-        cli_fn.phase_3_summarize(overwrite=args.overwrite)
+        cli_fn.phase_3_summarize(overwrite=args.overwrite, skip_macromolecules=args.skip_macromolecules)
     elif args.command == 'render':
         cli_fn.phase_3_render(args.configuration, args.max_number, args.tomogram, args.overwrite, args.processes, args.feature_library_path)
     elif args.command == 'projections':
@@ -102,4 +106,4 @@ if __name__ == "__main__":
     #     cli_fn.project_configuration = config
     # feature_library_path = os.path.join(os.path.expanduser("~"), ".Ais", "feature_library.txt")
     #
-    cli_fn.phase_3_render("C:/Users/mart_/PycharmProjects/Pom/render_configuration.json")
+    cli_fn.phase_3_render("render_configuration.json", tomo_name="01122021_BrnoKrios_arctis_lam1_pos5_bin2")

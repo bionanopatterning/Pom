@@ -1,12 +1,43 @@
-from Pom.core.config import *
 import streamlit as st
+import json
+from Pom.core.config import parse_feature_library, FeatureLibraryFeature
 import pandas as pd
+import os
+from PIL import Image
+import numpy as np
+import copy
 import matplotlib.pyplot as plt
 
 st.set_page_config(
     page_title="Tomogram details",
     layout='wide'
 )
+
+with open("project_configuration.json", 'r') as f:
+    project_configuration = json.load(f)
+
+
+def get_image(tomo, image, projection=False):
+    image_dir = image.split("_")[0]
+    if projection:
+        image_dir += "_projection"
+    img_path = os.path.join(project_configuration["image_dir"], image_dir, f"{tomo}_{image}.png")
+    if os.path.exists(img_path):
+        return Image.open(img_path)
+    else:
+        return Image.fromarray(np.zeros((128, 128)), mode='L')
+
+
+def recolor(color, style=0):
+    if style == 0:
+        return (np.array(color) / 2.0 + 0.5)
+    if style == 1:
+        return (np.array(color) / 8 + 0.875)
+    else:
+        return color
+
+
+feature_library = parse_feature_library("feature_library.txt")
 
 @st.cache_data
 def load_data():
@@ -21,8 +52,8 @@ def load_data():
 
     return cache_df, cache_rank_df
 
-
 df, rank_df = load_data()
+
 
 def rank_distance_series(tomo_name, rank_df):
     m_ranks = rank_df.loc[tomo_name]
@@ -39,7 +70,7 @@ if "tomo_id" in st.query_params:
 tomo_names = df.index.tolist()
 _, column_base, _ = st.columns([3, 15, 3])
 with column_base:
-    c1, c2, c3 = st.columns([1, 29, 1])
+    c1, c2, c3 = st.columns([1, 19, 1])
     with c1:
         if st.button("<"):
             idx = tomo_names.index(tomo_name)
@@ -68,20 +99,31 @@ with column_base:
     ranked_distance_series = rank_distance_series(tomo_name, rank_df)
     c1, c2 = st.columns([5, 5])
     with c1:
-        st.markdown(f'<div style="text-align: center;margin-bottom: -15px; font-size: 14px;"><b>Most similar tomograms</b></div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="text-align: center;margin-bottom: -15px; font-size: 14px;"><b>Most similar tomograms</b></div>',
+            unsafe_allow_html=True)
         for j in range(3):
-            t_name = ranked_distance_series.index[1+j]
+            t_name = ranked_distance_series.index[1 + j]
             t_link = f"/Browse_tomograms?tomo_id={t_name}"
-            st.markdown(f"<p style='text-align: center; margin-bottom: -20px;font-size: 12px;'><a href='{t_link}'>{t_name}</a></p>", unsafe_allow_html=True)
+            st.markdown(
+                f"<p style='text-align: center; margin-bottom: -20px;font-size: 12px;'><a href='{t_link}'>{t_name}</a></p>",
+                unsafe_allow_html=True)
     with c2:
-        st.markdown(f'<div style="text-align: center;margin-top: 5px; margin-bottom: -15px; font-size: 14px;"><b>Most dissimilar tomograms:</b></div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="text-align: center;margin-top: 5px; margin-bottom: -15px; font-size: 14px;"><b>Most dissimilar tomograms:</b></div>',
+            unsafe_allow_html=True)
         for j in range(3):
-            t_name = ranked_distance_series.index[-(j+1)]
+            t_name = ranked_distance_series.index[-(j + 1)]
             t_link = f"/Browse_tomograms?tomo_id={t_name}"
-            st.markdown(f"<p style='text-align: center; margin-bottom: -20px;font-size: 12px;'><a href='{t_link}'>{t_name}</a></p>", unsafe_allow_html=True)
+            st.markdown(
+                f"<p style='text-align: center; margin-bottom: -20px;font-size: 12px;'><a href='{t_link}'>{t_name}</a></p>",
+                unsafe_allow_html=True)
 
     st.text("")
-    ontologies = [o for o in project_configuration["ontologies"] if o != "_"]
+    ontologies = df.loc[tomo_name].sort_values(ascending=False).index.tolist()
+    for o in project_configuration["macromolecules"] + project_configuration["soft_ignore_in_summary"]:
+        if o in ontologies:
+            ontologies.remove(o)
     for o in project_configuration["soft_ignore_in_summary"]:
         if o not in ontologies:
             ontologies.append(o)
@@ -96,3 +138,5 @@ with column_base:
                 st.text(f"{o}")
                 st.image(get_image(tomo_name, o, projection=True).transpose(Image.FLIP_TOP_BOTTOM), use_column_width=True)
                 st.image(get_image(tomo_name, f"{o}_side", projection=True).transpose(Image.FLIP_TOP_BOTTOM), use_column_width=True)
+
+

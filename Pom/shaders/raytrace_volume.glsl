@@ -5,7 +5,7 @@ layout(binding = 0) uniform sampler3D volume;
 layout(binding = 1) uniform sampler2D depth_start;
 layout(binding = 2) uniform sampler2D depth_stop;
 layout(binding = 3, rgba32f) uniform image2D target;
-layout(local_size_x = 16, local_size_y=16) in;
+layout(local_size_x = 32, local_size_y=32) in;
 
 uniform mat4 ipMat;
 uniform mat4 ivMat;
@@ -48,9 +48,11 @@ void main()
     vec3 dir = normalize(stop_pos - start_pos);
     vec3 volume_size = vec3(X, Y, Z);
 
+    //imageStore(target, px, vec4(z_start / 2.0 + 0.5f, z_stop / 2.0 + 0.5f, 0.0f, 1.0f));
+    //return;
     if (z_start == 1.0f)
     {
-        imageStore(target, px, vec4(0.0f, 0.0f, 0.0f, 1.0f));
+        imageStore(target, px, vec4(0.0f, 0.0f, 0.0f, 0.0f));
     }
     else
     {
@@ -70,12 +72,19 @@ void main()
             }
             pos += dir;
             uvw = pos.xyz / imgSize / pixelSize + 0.5f;
-            rayValue += texture(volume, uvw).r;
+            float voxelValue = texture(volume, uvw).r;
+
+            float lim_low = 0.5f;
+            rayValue += clamp(voxelValue - lim_low, 0.0f, 1.0f) * (1.0f / (1.0f - lim_low));
         }
         // Write to texture.
-        vec3 rayColour = C * rayValue / 500.0;
-        vec3 pixelColour = imageLoad(target, px).rgb;
-        imageStore(target, px, vec4(pixelColour + rayColour, 1.0));
+        rayValue = rayValue / 225.0;
+        rayValue = clamp(rayValue, 0.0, 1.0);
+        vec3 rayColour = C * rayValue;
+        vec4 pixelColour = imageLoad(target, px);
+        pixelColour.a = clamp(pixelColour.a, 0.0, 1.0);
+        pixelColour += vec4(rayColour, rayValue);
+        imageStore(target, px, pixelColour);
 
     }
 }

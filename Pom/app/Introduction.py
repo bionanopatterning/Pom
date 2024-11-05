@@ -76,7 +76,7 @@ with c2:
         labels=pie_data.keys(),  # Labels for pie chart
         colors=pie_colours,  # Custom colors for each slice
         autopct='%1.1f%%',  # Show percentage
-        startangle=90,  # Start angle for better alignment
+        startangle=0,  # Start angle for better alignment
         explode=[0.0] * len(pie_data),
         textprops={'fontsize': 6}
     )

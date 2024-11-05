@@ -4,13 +4,14 @@ from Pom.core.config import project_configuration, feature_library
 import json
 import glfw
 from skimage import measure
-from scipy.ndimage import label, binary_dilation, gaussian_filter
+from scipy.ndimage import label, binary_dilation, gaussian_filter1d, gaussian_filter
 
 import matplotlib.pyplot as plt
 
 # TODO: add ray-traced volume rendering
 # TODO: changed the zmin to 1e3, see if that doesn't clip certain objects!
-PIXEL_SCALE = 1000
+PIXEL_SCALE = 950
+
 
 class Renderer:
     def __init__(self, image_size=512):
@@ -31,6 +32,7 @@ class Renderer:
         self.edge_shader = Shader(os.path.join(cfg.root, "shaders", "se_depth_edge_detect.glsl"))
         self.depth_mask_shader = Shader(os.path.join(cfg.root, "shaders", "se_depth_mask_shader.glsl"))
         self.ray_trace_shader = Shader(os.path.join(cfg.root, "shaders", "raytrace_volume.glsl"))
+        self.ndc_img_shader = Shader(os.path.join(cfg.root, "shaders", "ndc_image.glsl"))
 
         self.style = 0
 
@@ -43,6 +45,7 @@ class Renderer:
         glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
         glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
         self.scene_fbo = FrameBuffer(width=self.image_size, height=self.image_size, texture_format="rgba32f")
+        self.scene_fbo_b = FrameBuffer(width=self.image_size, height=self.image_size, texture_format="rgba32f")
         self.depth_fbo_a = FrameBuffer(width=self.image_size, height=self.image_size, texture_format="rgba32f")
         self.depth_fbo_b = FrameBuffer(width=self.image_size, height=self.image_size, texture_format="rgba32f")
         self.volume_fbo = FrameBuffer(width=self.image_size, height=self.image_size, texture_format="rgba32f")
@@ -54,14 +57,36 @@ class Renderer:
         # TODO: make it possible to use style = 0, or 1, or 2, for different styles.
         self.RENDER_SILHOUETTES = True
         self.RENDER_SILHOUETTES_ALPHA = 0.5
-        self.RENDER_SILHOUETTES_THRESHOLD = 0.01
+        self.RENDER_SILHOUETTES_THRESHOLD = 0.025
 
         self.camera = Camera3D(self.image_size)
         self.camera.on_update()
         self.volume_fbo_active = False
         self.light = Light3D()
         self.ambient_strength = 0.75
-        self.background_colour = (1.0, 1.0, 1.0, 1.0)
+        self.background_colour = (1.0, 1.0, 1.0, 0.0)
+
+    @staticmethod
+    def poll_gl_states():
+        # List of capabilities to check
+        capabilities = [
+            (GL_BLEND, 'GL_BLEND'),
+            (GL_CULL_FACE, 'GL_CULL_FACE'),
+            (GL_DEPTH_TEST, 'GL_DEPTH_TEST'),
+            (GL_DITHER, 'GL_DITHER'),
+            (GL_POLYGON_OFFSET_FILL, 'GL_POLYGON_OFFSET_FILL'),
+            (GL_SAMPLE_ALPHA_TO_COVERAGE, 'GL_SAMPLE_ALPHA_TO_COVERAGE'),
+            (GL_SAMPLE_COVERAGE, 'GL_SAMPLE_COVERAGE'),
+            (GL_SCISSOR_TEST, 'GL_SCISSOR_TEST'),
+            (GL_STENCIL_TEST, 'GL_STENCIL_TEST'),
+            (GL_MULTISAMPLE, 'GL_MULTISAMPLE'),
+            # Add more capabilities as needed
+        ]
+        # Poll and print the state of each capability
+        for cap, cap_name in capabilities:
+            print(cap, cap_name)
+            state = glIsEnabled(cap)
+            print(f'{cap_name}: {"Enabled" if state else "Disabled"}')
 
     def delete(self):
         glfw.terminate()
@@ -82,7 +107,7 @@ class Renderer:
 
         # ray trace the volumes one by one.
         self.volume_fbo.bind()
-        glClearColor(0.0, 0.0, 0.0, 1.0)
+        glClearColor(0.0, 0.0, 0.0, 0.0)
         glClear(GL_COLOR_BUFFER_BIT)
 
         Z, X, Y = m_volumes[0].data.shape
@@ -103,17 +128,27 @@ class Renderer:
         glBindTexture(GL_TEXTURE_2D, self.depth_fbo_a.depth_texture_renderer_id)
         glBindImageTexture(3, self.volume_fbo.texture.renderer_id, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F)
 
-        for v in reversed(m_volumes):
+        for v in m_volumes:
             glActiveTexture(GL_TEXTURE0)
             glBindTexture(GL_TEXTURE_3D, self.texture3d)
-            volume_data = v.data#np.swapaxes(v.data, 0, 2)
-            glTexImage3D(GL_TEXTURE_3D, 0, GL_RED, v.data.shape[1], v.data.shape[2], v.data.shape[0], 0, GL_RED, GL_FLOAT, volume_data.flatten())
+            glTexImage3D(GL_TEXTURE_3D, 0, GL_RED, v.data.shape[1], v.data.shape[2], v.data.shape[0], 0, GL_RED, GL_FLOAT, v.data.flatten())
             self.ray_trace_shader.uniform3f("C", v.colour)
-            glDispatchCompute(self.image_size // 16, self.image_size // 16, 1)
+            glDispatchCompute(self.image_size // 32, self.image_size // 32, 1)
             glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
-
+            glFinish()
         self.volume_fbo_active = True
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
 
+        self.scene_fbo.bind()
+        glActiveTexture(GL_TEXTURE0)
+        glBindTexture(GL_TEXTURE_2D, self.volume_fbo.texture.renderer_id)
+        self.ndc_img_shader.bind()
+        self.ndc_screen_va.bind()
+        glDrawElements(GL_TRIANGLES, self.ndc_screen_va.indexBuffer.getCount(), GL_UNSIGNED_SHORT, None)
+        self.ndc_screen_va.unbind()
+        self.ndc_img_shader.unbind()
+        # combine the isosurface image and the volume images
 
     def render_surface_models(self, surface_models):
         glEnable(GL_BLEND)
@@ -143,12 +178,12 @@ class Renderer:
 
         if len(alpha_sorted_surface_models) > 0:
             glBindFramebuffer(GL_READ_FRAMEBUFFER, self.scene_fbo.framebufferObject)
-            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, self.depth_fbo_b.framebufferObject)
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, self.scene_fbo_b.framebufferObject)
             glBlitFramebuffer(0, 0, self.image_size, self.image_size, 0, 0, self.image_size, self.image_size, GL_DEPTH_BUFFER_BIT, GL_NEAREST)
             glBindFramebuffer(GL_FRAMEBUFFER, self.scene_fbo.framebufferObject)
             self.edge_shader.bind()
             glActiveTexture(GL_TEXTURE0)
-            glBindTexture(GL_TEXTURE_2D, self.depth_fbo_b.depth_texture_renderer_id)
+            glBindTexture(GL_TEXTURE_2D, self.scene_fbo_b.depth_texture_renderer_id)
             self.edge_shader.uniform1f("threshold", self.RENDER_SILHOUETTES_THRESHOLD)
             self.edge_shader.uniform1f("edge_alpha", self.RENDER_SILHOUETTES_ALPHA)
             self.edge_shader.uniform1f("zmin", self.camera.clip_near)
@@ -178,7 +213,7 @@ class Renderer:
 
 
         # read scene depth
-        self.depth_fbo_b.bind()
+        self.scene_fbo_b.bind()
         data = glReadPixels(0, 0, self.image_size, self.image_size, GL_DEPTH_COMPONENT, GL_FLOAT)
         scene_depth = np.frombuffer(data, dtype=np.float32).reshape(self.image_size, self.image_size)
 
@@ -209,10 +244,14 @@ class Renderer:
         # render the start depth
         self.depth_fbo_b.bind()
         glEnable(GL_DEPTH_TEST)
+        glDisable(GL_BLEND)
+        glDisable(GL_SCISSOR_TEST)
+        glDisable(GL_CULL_FACE)
         glDepthFunc(GL_LESS)
-        glDepthMask(GL_TRUE)
         glClearDepth(1.0)
-        glClear(GL_DEPTH_BUFFER_BIT)
+        glClearColor(0.0, 0.0, 0.0, 0.0)
+        glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT)
+
 
         self.depth_mask_shader.bind()
         self.depth_mask_shader.uniformmat4("vpMat", self.camera.matrix)
@@ -221,8 +260,9 @@ class Renderer:
         self.box_va.unbind()
 
         self.depth_mask_shader.unbind()
-        self.depth_fbo_b.unbind((0, 0, self.image_size, self.image_size))
+        glFinish()
 
+        self.depth_fbo_b.unbind((0, 0, self.image_size, self.image_size))
         glDepthFunc(GL_LESS)
         glClearDepth(1.0)
 
@@ -230,29 +270,19 @@ class Renderer:
         self.scene_fbo.bind()
         glClearColor(*self.background_colour)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        self.scene_fbo_b.bind()
+        glClearColor(*self.background_colour)
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         self.volume_fbo.bind()
-        glClearColor(0.0, 0.0, 0.0, 1.0)
+        glClearColor(0.0, 0.0, 0.0, 0.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
     def get_image(self):
         self.scene_fbo.bind()
         glBindTexture(GL_TEXTURE_2D, self.scene_fbo.texture.renderer_id)
         data = glReadPixels(0, 0, self.image_size, self.image_size, GL_RGBA, GL_FLOAT)
-        s_image = np.frombuffer(data, dtype=np.float32).reshape((self.image_size, self.image_size, 4))
-        if self.volume_fbo_active:
-            self.volume_fbo.bind()
-            data = glReadPixels(0, 0, self.image_size, self.image_size, GL_RGBA, GL_FLOAT)
-            v_image = np.frombuffer(data, dtype=np.float32).reshape((self.image_size, self.image_size, 4))
-
-            plt.subplot(1,3,1)
-            plt.imshow(v_image[::-1, :])
-            plt.subplot(1,3,2)
-            plt.imshow(s_image)
-            plt.subplot(1, 3, 3)
-            plt.imshow(s_image + v_image)
-            plt.show()
-            s_image += v_image
-        image = np.flip(s_image, axis=0)[:, :, :3] * 255
+        image = np.frombuffer(data, dtype=np.float32).reshape((self.image_size, self.image_size, 4))
+        image = np.flip(image, axis=0)[:, :, :3] * 255
         image = np.clip(image, 0, 255)
         image = image.astype(np.uint8)
         return image
@@ -261,6 +291,13 @@ class Renderer:
 class VolumeModel:
     def __init__(self, data, feature_definition, pixel_size):
         self.data = data
+        self.data = gaussian_filter1d(data, sigma=3.0, axis=0)
+        self.data[0, :, :] = 0
+        self.data[:, 0, :] = 0
+        self.data[:, :, 0] = 0
+        self.data[-1, :, :] = 0
+        self.data[:, -1, :] = 0
+        self.data[:, :, -1] = 0
         self.title = feature_definition.title
         self.colour = feature_definition.colour
         self.pixel_size = pixel_size
@@ -273,7 +310,7 @@ class SurfaceModel:
     def __init__(self, data, feature_definition, pixel_size):
         self.data = data
         if self.data.dtype == np.float32:
-            self.data = gaussian_filter(self.data, sigma=2)
+            self.data = gaussian_filter1d(self.data, sigma=3.0, axis=0)
         self.data[0, :, :] = 0
         self.data[-1, :, :] = 0
         self.data[:, 0, :] = 0
@@ -432,8 +469,8 @@ class Camera3D:
         self.projection_matrix = np.eye(4)
         self.view_projection_matrix = np.eye(4)
         self.focus = np.zeros(3)
-        self.pitch = -30.0
-        self.yaw = 180.0
+        self.pitch = project_configuration["camera_pitch"]
+        self.yaw = project_configuration["camera_yaw"]
         self.distance = 1120.0
         self.clip_near = 1e2
         self.clip_far = 1e4

@@ -1,22 +1,55 @@
 import streamlit as st
+import json
+import os
 import copy
+from PIL import Image
 import pandas as pd
-from Pom.core.config import *
+import numpy as np
+from Pom.core.config import parse_feature_library, FeatureLibraryFeature
+import matplotlib.pyplot as plt
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 from matplotlib import colors
-
 
 st.set_page_config(
     page_title="Results table",
     layout='wide'
 )
 
+with open("project_configuration.json", 'r') as f:
+    project_configuration = json.load(f)
+
+
+feature_library = parse_feature_library("feature_library.txt")
 df = pd.read_excel(os.path.join(project_configuration["root"], "summary.xlsx"), index_col=0)
 df = df.dropna(axis=0)
 
 
+with open("project_configuration.json", 'r') as f:
+    project_configuration = json.load(f)
+
+
+
+def get_image(tomo, image):
+    image_dir = image.split("_")[0]
+    img_path = os.path.join(project_configuration["image_dir"], image_dir, f"{tomo}_{image}.png")
+    if os.path.exists(img_path):
+        return Image.open(img_path)
+    else:
+        return Image.fromarray(np.zeros((128, 128)), mode='L')
+
+def recolor(color, style=0):
+    if style == 0:
+        return (np.array(color) / 2.0 + 0.5)
+    if style == 1:
+        return (np.array(color) / 8 + 0.875)
+    else:
+        return color
+
+
+
 copy_df = copy.deepcopy(df)
 copy_df = copy_df.reset_index()
+copy_df.rename(columns={'tomogram': 'Tomogram'}, inplace=True)
 copy_df = copy_df.round(1)
 columns = list(copy_df.columns)
 for o in project_configuration["soft_ignore_in_summary"] + project_configuration["macromolecules"]:
@@ -35,7 +68,7 @@ for k in copy_df.columns:
 
 
 st.title("Dataset summary")
-n_ontologies = len([o for o in project_configuration["ontologies"] if o != "_"]) + 1
+n_ontologies = len(project_configuration["ontologies"]) + 1
 n_macromolecules = len(project_configuration["macromolecules"])
 if "Density" in project_configuration["macromolecules"]:
     n_macromolecules -= 1
@@ -60,8 +93,6 @@ with st.expander(label="Filters"):
     for idx, col in enumerate(numerical_columns):
         min_val = float(copy_df[col].min())
         max_val = float(copy_df[col].max())
-        if max_val <= min_val:
-            max_val = min_val + 0.1
         col_idx = idx % n_sliders_per_row  # Choose column for slider
         with cols[col_idx]:  # Add slider in the appropriate column
             slider_filters[col] = st.slider(f"{col}", min_val, max_val, (min_val, max_val))
