@@ -16,11 +16,11 @@ __________
    :caption: Contents:
 
    installation
-   project setup
-   organelle segmentation
-   exploring the results
-   context-aware particle picking
-   area-selective template matching
+   project_setup
+   organelle_segmentation
+   exploring_the_results
+   context-aware_particle_picking
+   area-selective_template_matching
 
 Introduction
 __________
