@@ -6,8 +6,6 @@ import glfw
 from skimage import measure
 from scipy.ndimage import label, binary_dilation, gaussian_filter1d, gaussian_filter
 
-import matplotlib.pyplot as plt
-
 # TODO: add ray-traced volume rendering
 # TODO: changed the zmin to 1e3, see if that doesn't clip certain objects!
 PIXEL_SCALE = 950

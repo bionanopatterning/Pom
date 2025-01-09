@@ -1,0 +1,74 @@
+Project setup
+__________
+
+Before doing any segmentation, we set up a new Pom project by running the following command in the base folder of your project:
+
+::
+
+   pom
+
+If no previous project is found in the directory, the output will be:
+
+::
+
+   created project_configuration.json at /lmb/home/mlast/PycharmProjects/Pom/project_configuration.json
+   created render_configuration.json at /lmb/home/mlast/PycharmProjects/Pom/render_configuration.json
+
+These two newly created files can be used to configure the project and rendering settings. In the project configuration, you'll find the following entries:
+
+.. code-block:: JSON
+
+    {
+      "root": "",
+      "tomogram_dir": "full_dataset",
+      "macromolecule_dir": "macromolecules",
+      "output_dir": "ontologies",
+      "test_dir": "test_output",
+      "image_dir": "images",
+      "ontology_annotation_box_size": 128,
+      "apix": 15.68,
+      "macromolecules": [
+        "Ribosome",
+        "Membrane",
+        "Density"
+      ],
+      "ontologies": [
+        "Cytoplasm",
+        "Mitochondrion",
+        "Nuclear envelope",
+        "Nucleoplasm",
+        "Pyrenoid tube",
+        "Thylakoid",
+        "Vesicle",
+        "Void",
+        "Golgi",
+        "Pyrenoid",
+        "Stroma"
+      ],
+      "z_sum": 4,
+      "single_model_epochs": 100,
+      "single_model_batch_size": 32,
+      "single_model_overlap": 0.0,
+      "single_model_box_size": 256,
+      "shared_model_epochs": 200,
+      "shared_model_batch_size": 64,
+      "shared_model_overlap": 0.0,
+      "shared_model_box_size": 256,
+      "shared_model_unknown_class_threshold": 0.33,
+      "shared_model_unknown_output_thresold": 0.5,
+      "tf_distribute_mirrored": true,
+      "shared_model_runs_per_volume": 4,
+      "GPUS": "0,1,2,3,4,5,6,7",
+      "image_size": 1024,
+      "soft_ignore_in_summary": ["Void"],
+      "gallery_categories": ["Macromolecules", "Top3", "density"],
+      "raytraced_ontologies": false,
+      "camera_pitch": -30.0,
+      "camera_yaw": 180.0,
+      "z_margin_summary": 0.3
+    }
+
+
+
+
+

@@ -8,10 +8,6 @@ import shutil
 root = os.path.dirname(os.path.dirname(__file__))
 
 def main():
-    render_config_json_path = os.path.join(os.getcwd(), "render_configuration.json")
-    if not os.path.exists(render_config_json_path):
-        shutil.copy(os.path.join(os.path.dirname(__file__), "core", "render_configuration.json"), render_config_json_path)
-
     parser = argparse.ArgumentParser(description=f"Ontoseg cli tool")
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
 
@@ -99,11 +95,4 @@ def main():
     #     cli_fn.phase_0_segment(args.model_path, args.overwrite, args.gpus)
 
 if __name__ == "__main__":
-    # main()
-    # with open("C:/Users/mgflast/PycharmProjects/ontoseg/project_configuration.json", 'r') as f:
-    #     config = json.load(f)
-    #     cfg.project_configuration = config
-    #     cli_fn.project_configuration = config
-    # feature_library_path = os.path.join(os.path.expanduser("~"), ".Ais", "feature_library.txt")
-    #
-    cli_fn.phase_3_render("render_configuration.json", tomo_name="01122021_BrnoKrios_arctis_lam1_pos5_bin2")
+    main()

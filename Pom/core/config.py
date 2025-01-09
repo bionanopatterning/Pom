@@ -6,10 +6,12 @@ import numpy as np
 
 root = os.path.dirname(os.path.dirname(__file__))
 
-project_config_json_path = os.path.join(os.getcwd(), "project_configuration.json")
-if not os.path.exists(project_config_json_path):
-    shutil.copy(os.path.join(os.path.dirname(__file__), "project_configuration.json"), project_config_json_path)
-
+project_configuration_json_path = os.path.join(os.getcwd(), "project_configuration.json")
+if not os.path.exists(project_configuration_json_path):
+    shutil.copy(os.path.join(os.path.dirname(__file__), "project_configuration.json"), project_configuration_json_path)
+    print(f"created project_configuration.json at {project_configuration_json_path}")
+    shutil.copy(os.path.join(os.path.dirname(__file__), "render_configuration.json"), os.path.join(os.getcwd(), "render_configuration.json"))
+    print(f"created render_configuration.json at {os.path.join(os.getcwd(), 'render_configuration.json')}")
 
 def get_image(tomo, image, projection=False):
     image_dir = image.split("_")[0]
