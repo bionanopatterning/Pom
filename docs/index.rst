@@ -17,9 +17,8 @@ __________
 
    installation
    project setup
-   macromolecule segmentation
    organelle segmentation
-   browsing segmentations
+   exploring the results
    context-aware particle picking
    area-selective template matching
 

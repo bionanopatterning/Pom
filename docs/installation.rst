@@ -1,7 +1,7 @@
 Installation
 __________
 
-Pom was originally developed as an extension to `Ais <https://ais-cryoet.readthedocs.io/en/latest/>`_, our software for streamlined tomogram segmentation. As such, it is practical to install both Ais and Pom in the same environment. If you already have an environment with Ais installed, you can skip the first step below.
+Pom was originally developed as an extension to `Ais <https://ais-cryoet.readthedocs.io/en/latest/>`_, our software for streamlined tomogram segmentation. As such, it is practical to install both Ais and Pom in the same environment. If you already have an environment with Ais installed, you can just run 'pip install Pom-cryoET' in the same environment and skip the instructions below.
 
 Installing Ais and Pom
 ^^^^^^^^^^^^

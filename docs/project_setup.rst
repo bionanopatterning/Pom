@@ -22,15 +22,15 @@ These two newly created files can be used to configure the project and rendering
       "root": "",
       "tomogram_dir": "full_dataset",
       "macromolecule_dir": "macromolecules",
-      "output_dir": "ontologies",
-      "test_dir": "test_output",
+      "output_dir": "output",
+      "test_dir": "test",
       "image_dir": "images",
       "ontology_annotation_box_size": 128,
       "apix": 15.68,
       "macromolecules": [
-        "Ribosome",
+        "Density",
         "Membrane",
-        "Density"
+        "Ribosome"
       ],
       "ontologies": [
         "Cytoplasm",
@@ -68,7 +68,52 @@ These two newly created files can be used to configure the project and rendering
       "z_margin_summary": 0.3
     }
 
+Most of these can be ignored for now, except for the first few. Pom expects the directory of a project to be structures as follows:
 
+.. code-block:: text
 
+   root/
+   ├── tomogram_dir/                  (directory where input tomograms and annotated tomograms are stored)
+   │   ├── TS_001.mrc
+   │   ├── TS_002.mrc
+   │   ├── TS_002.scns
+   │   └── etc.
+   ├── macromolecule_dir/             (directory where macromolecule segmentations are saved)
+   │   ├── TS_001__Membrane.mrc
+   │   ├── TS_001__Ribosome.mrc
+   │   └── etc.
+   ├── output_dir/                    (directory where organelle segmentations are saved)
+   │   ├── TS_001__Cytoplasm.mrc
+   │   ├── TS_001__Mitochondrion.mrc
+   │   └── etc.
+   ├── test_dir/                      (directory where a subset of tomograms can be placed, which can then be used for testing)
+   ├── image_dir/                     (directory where 3D and 2D projection images are saved)
+   │   ├── Density/
+   │   ├── Cytoplasm/
+   │   ├── Mitochondrion/
+   │   └── etc.
 
+Here, 'tomogram_dir', 'macromolecule_dir', etc. should have the names as specified in the project configuration.
 
+Next, define the input and ouput channels to be used in the segmentation. In the example below one would use density volumes plus membrane and ribosome segmentations as the input, and output the listed organelles.
+
+.. code-block:: JSON
+
+    {
+      "macromolecules": [
+        "Density",
+        "Membrane",
+        "Ribosome"
+      ],
+      "ontologies": [
+        "Cytoplasm",
+        "Mitochondrion",
+        "Nuclear envelope",
+        "Nucleoplasm",
+        "Pyrenoid tube",
+        "Thylakoid",
+        "Vesicle",
+        "Void",
+        "Golgi",
+        "Pyrenoid",
+    }
