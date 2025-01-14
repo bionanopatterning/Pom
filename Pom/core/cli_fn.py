@@ -206,7 +206,8 @@ def phase_1_train(gpus, ontology):
     print(f'Saved: {os.path.join(project_configuration["root"], "models", "phase1", f"{ontology}.h5")}')
 
 
-def phase_1_test(gpus, ontology):
+def phase_1_test(gpus, ontology, process=True):
+    """if process == True, apply model to dataset & save to output dir rather than to test."""
     import tensorflow as tf
     import multiprocessing
     import itertools
@@ -239,9 +240,11 @@ def phase_1_test(gpus, ontology):
             data_y[j, :, :] = np.squeeze(boxes_to_image(boxes, imgsize, padding, stride))
         return data_y
 
-    def _thread(model_path, tomogram_paths, gpu_id):
+    def _thread(model_path, tomogram_paths, gpu_id, process=False):
         os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
 
+        output_directory = os.path.join(project_configuration["root"], project_configuration["test_dir"]) if not process else os.path.join(project_configuration["root"], project_configuration["output_dir"])
+        os.makedirs(output_directory, exist_ok=True)
         inference_model = create_model((None, None, len(project_configuration["macromolecules"])), output_dimensionality=1)
         trained_model = tf.keras.models.load_model(model_path, compile=False)
         for nl, l in zip(inference_model.layers, trained_model.layers):
@@ -250,7 +253,7 @@ def phase_1_test(gpus, ontology):
         for tomo in tomogram_paths:
             t_start = time.time()
             try:
-                out_name = os.path.join(project_configuration["root"], project_configuration["test_dir"], os.path.basename(os.path.splitext(tomo)[0])+f"__{ontology}.mrc")
+                out_name = os.path.join(output_directory, os.path.basename(os.path.splitext(tomo)[0])+f"__{ontology}.mrc")
                 vol_out = segment_tomo(tomo, inference_model)
                 with mrcfile.new(out_name, overwrite=True) as f:
                     f.set_data(vol_out.astype(np.float32))
@@ -260,6 +263,8 @@ def phase_1_test(gpus, ontology):
                 print(e)
 
     all_tomos = [p for p in glob.glob(os.path.join(project_configuration["root"], project_configuration["test_dir"], "*.mrc")) if not '__' in os.path.basename(p)]
+    if process:
+        all_tomos = [p for p in glob.glob(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], "*.mrc")) if not '__' in os.path.basename(p)]
     _gpus = [int(j) for j in gpus.split(",")]
     data_div = {gpu: list() for gpu in _gpus}
     for gpu, tomo_path in zip(itertools.cycle(_gpus), all_tomos):
@@ -267,12 +272,11 @@ def phase_1_test(gpus, ontology):
 
     processes = []
     for gpu_id in data_div:
-        p = multiprocessing.Process(target=_thread, args=(os.path.join(project_configuration["root"], "models", "phase1", f"{ontology}.h5"), data_div[gpu_id], gpu_id))
+        p = multiprocessing.Process(target=_thread, args=(os.path.join(project_configuration["root"], "models", "phase1", f"{ontology}.h5"), data_div[gpu_id], gpu_id, process))
         processes.append(p)
         p.start()
     for p in processes:
         p.join()
-
 
 def phase_2_initialize(selective=False):
     """

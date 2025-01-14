@@ -31,6 +31,10 @@ def main():
     p1sp_test.add_argument('-ontology', required=True, help='The ontology for which to test the trained network.')
     p1sp_test.add_argument('-gpus', required=False, help='Which GPUs to use, e.g. "0,1,2,3" for GPU 0-3. If used, overrides the GPU usage set in the project configuration.')
 
+    p1sp_process = p1sp.add_parser('process', help='Process all volumes using a single-ontology output model for a selected ontology.')
+    p1sp_process.add_argument('-ontology', required=True, help='Which feature to segment.')
+    p1sp_process.add_argument('-gpus', required=False, help='Which GPUs to use, e.g. "0,1,2,3" for GPU 0-3. If used, overrides the GPU usage set in the project configuration.')
+
     # Shared model commands
     p2p = subparsers.add_parser('shared', help='Initialize, train, or launch phase2 combined models.')
     p2sp = p2p.add_subparsers(dest='phase2_command', help='Shared-model commands')
@@ -73,7 +77,10 @@ def main():
             cli_fn.phase_1_train(gpus, args.ontology)
         elif args.phase1_command == "test":
             gpus = cfg.project_configuration["GPUS"] if not args.gpus else args.gpus
-            cli_fn.phase_1_test(gpus, args.ontology)
+            cli_fn.phase_1_test(gpus, args.ontology, process=False)
+        elif args.phase1_command == "process":
+            gpus = cfg.project_configuration["GPUS"] if not args.gpus else args.gpus
+            cli_fn.phase_1_test(gpus, args.ontology, process=True)
     elif args.command == 'shared':
         if args.phase2_command == "initialize":
             cli_fn.phase_2_initialize(selective=args.selective)

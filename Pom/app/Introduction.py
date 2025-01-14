@@ -44,7 +44,7 @@ with c2:
     ontologies = [o for o in project_configuration["ontologies"] if o != "_"]
     n_volumes = len(df) * (len(macromolecules) + len(ontologies) + 2)
 
-    st.text(f"{len(df)} tomograms, {len(macromolecules)} macromolecules, {len(ontologies) + 1} ontologies, {n_volumes} volumes.")
+    st.text(f"{len(df)} tomograms, {len(macromolecules)} macromolecules, {len(ontologies) + 1} organelles, {n_volumes} volumes.")
 
     st.markdown(f"All segmentations, visualizations, and other data shared on these pages, including this summary report, were generated using Pom - a _work-in-progress_ Python cli module for making sense of large datasets.")
 

@@ -5,7 +5,7 @@
 
 # Pom
 
-Scaling data analyses in cellular cryoET using comprehensive segmentation.
+**Scaling data analyses in cellular cryoET using comprehensive segmentation.**  
 
 ## Abstract
 

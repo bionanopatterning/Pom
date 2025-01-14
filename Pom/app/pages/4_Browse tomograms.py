@@ -89,12 +89,12 @@ with column_base:
     tomo_title_field = st.markdown(f'<div style="text-align: center;font-size: 30px;"><b>{tomo_name}\n\n</b></div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns([5, 5, 5])
     with c1:
-        st.image(get_image(tomo_name, "density").transpose(Image.FLIP_TOP_BOTTOM), use_column_width=True,
+        st.image(get_image(tomo_name, "density").transpose(Image.FLIP_TOP_BOTTOM), use_container_width=True,
                  caption="Density (central slice)")
     with c2:
-        st.image(get_image(tomo_name, "Macromolecules"), use_column_width=True, caption="Macromolecules")
+        st.image(get_image(tomo_name, "Macromolecules"), use_container_width=True, caption="Macromolecules")
     with c3:
-        st.image(get_image(tomo_name, "Top3"), use_column_width=True, caption="Top 3 ontologies")
+        st.image(get_image(tomo_name, "Top3"), use_container_width=True, caption="Top 3 ontologies")
 
     ranked_distance_series = rank_distance_series(tomo_name, rank_df)
     c1, c2 = st.columns([5, 5])
@@ -136,7 +136,7 @@ with column_base:
         for o, c in zip(col_ontologies, st.columns(n_imgs_per_row)):
             with c:
                 st.text(f"{o}")
-                st.image(get_image(tomo_name, o, projection=True).transpose(Image.FLIP_TOP_BOTTOM), use_column_width=True)
-                st.image(get_image(tomo_name, f"{o}_side", projection=True).transpose(Image.FLIP_TOP_BOTTOM), use_column_width=True)
+                st.image(get_image(tomo_name, o, projection=True).transpose(Image.FLIP_TOP_BOTTOM), use_container_width=True)
+                st.image(get_image(tomo_name, f"{o}_side", projection=True).transpose(Image.FLIP_TOP_BOTTOM), use_container_width=True)
 
 
