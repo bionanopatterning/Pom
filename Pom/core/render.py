@@ -8,7 +8,7 @@ from scipy.ndimage import label, binary_dilation, gaussian_filter1d, gaussian_fi
 
 # TODO: add ray-traced volume rendering
 # TODO: changed the zmin to 1e3, see if that doesn't clip certain objects!
-PIXEL_SCALE = 950
+PIXEL_SCALE = 950 * 1.1
 
 
 class Renderer:
@@ -54,8 +54,8 @@ class Renderer:
 
         # TODO: make it possible to use style = 0, or 1, or 2, for different styles.
         self.RENDER_SILHOUETTES = True
-        self.RENDER_SILHOUETTES_ALPHA = 0.5
-        self.RENDER_SILHOUETTES_THRESHOLD = 0.025
+        self.RENDER_SILHOUETTES_ALPHA = project_configuration["silhouette_alpha"]
+        self.RENDER_SILHOUETTES_THRESHOLD = project_configuration["silhouette_threshold"]
 
         self.camera = Camera3D(self.image_size)
         self.camera.on_update()
@@ -308,7 +308,8 @@ class SurfaceModel:
     def __init__(self, data, feature_definition, pixel_size):
         self.data = data
         if self.data.dtype == np.float32:
-            self.data = gaussian_filter1d(self.data, sigma=3.0, axis=0)
+            self.data = gaussian_filter1d(self.data, sigma=2.0, axis=0)
+            self.data = gaussian_filter(self.data, sigma=1.0)
         self.data[0, :, :] = 0
         self.data[-1, :, :] = 0
         self.data[:, 0, :] = 0

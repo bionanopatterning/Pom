@@ -93,6 +93,8 @@ with st.expander(label="Filters"):
     for idx, col in enumerate(numerical_columns):
         min_val = float(copy_df[col].min())
         max_val = float(copy_df[col].max())
+        if max_val <= min_val:
+            max_val += 1.0
         col_idx = idx % n_sliders_per_row  # Choose column for slider
         with cols[col_idx]:  # Add slider in the appropriate column
             slider_filters[col] = st.slider(f"{col}", min_val, max_val, (min_val, max_val))

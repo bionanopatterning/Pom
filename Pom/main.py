@@ -11,13 +11,6 @@ def main():
     parser = argparse.ArgumentParser(description=f"Ontoseg cli tool")
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
 
-    # # Single model commands
-    # p0p = subparsers.add_parser('ais', help='An optimized wrapper for Ais segmentation jobs.')
-    # p0p.add_argument('-m', '--model_path', required=True, help='Path to an Ais model (.scnm file).')
-    # p0p.add_argument('-gpus', required=False, default='0', help='Which GPUs to use, e.g. "0,1,2,3". Default is "0".')
-    # p0p.add_argument('-overwrite', required=False, default=0, help='Whether to overwrite previously generated segmentations for this model. Default is 0.')
-
-
     p1p = subparsers.add_parser('single', help='Initialize, train, or test phase1 single-ontology output models.')
     p1sp = p1p.add_subparsers(dest='phase1_command', help='Single-model commands')
     p1sp.add_parser('initialize', help='Initialize the training data for selected annotations.')
@@ -25,7 +18,7 @@ def main():
     p1sp_train = p1sp.add_parser('train', help='Train a single-ontology output model for a selected ontology.')
     p1sp_train.add_argument('-ontology', required=True, help='The ontology for which to train a network.')
     p1sp_train.add_argument('-gpus', required=False, help='Which GPUs to use, e.g. "0,1,2,3" for GPU 0-3. If used, overrides the GPU usage set in the project configuration.')
-    #p1sp_train.add_argument('-split', required=False, default=0.0, help='Validation split size (default is no split applied; 0.1 = 10%, 0.2 = 20%, etc.).')
+    p1sp_train.add_argument('-c', '--counterexamples', required=False, default=0, help='(1 or 0 (default)). Whether or not to use negative image examples taken from datasets for other features. Images that are annotated as fully A can be used to instruct a model for feature B that that image is fully not B.')
 
     p1sp_test = p1sp.add_parser('test', help='Test a single-ontology output model for a selected ontology.')
     p1sp_test.add_argument('-ontology', required=True, help='The ontology for which to test the trained network.')
@@ -74,7 +67,7 @@ def main():
             cli_fn.phase_1_initialize()
         elif args.phase1_command == "train":
             gpus = cfg.project_configuration["GPUS"] if not args.gpus else args.gpus
-            cli_fn.phase_1_train(gpus, args.ontology)
+            cli_fn.phase_1_train(gpus, args.ontology, use_counterexamples=int(args.counterexamples))
         elif args.phase1_command == "test":
             gpus = cfg.project_configuration["GPUS"] if not args.gpus else args.gpus
             cli_fn.phase_1_test(gpus, args.ontology, process=False)

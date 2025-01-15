@@ -124,7 +124,7 @@ else:
                 image = get_image(tomo_name, st.session_state.display_option)
 
                 # Display the image
-                st.image(image, use_column_width=True)
+                st.image(image, use_container_width=True)
 
 
     # Pagination buttons

@@ -10,90 +10,21 @@ import copy
 from Pom.core.config import project_configuration, FeatureLibraryFeature, feature_library, parse_feature_library
 import shutil
 
-# TODO: add a fast, no-box-cropping Ais segmenting call
-
-#
-# def phase_0_segment(model_path, overwrite=0, gpus="0"):
-#     import tensorflow as tf
-#     from numpy.random import shuffle
-#     import multiprocessing
-#     from Ais.core.se_model import SEModel
-#     from tensorflow.keras.models import clone_model
-#     from tensorflow.keras.layers import Input
-#     from Ais.main import windowless
-#     import itertools
-#
-#     if not os.path.isabs(model_path):
-#         model_path = os.path.join(os.getcwd(), model_path)
-#
-#     if not os.path.exists(model_path):
-#         print(f"File {model_path} does not exists.")
-#         return
-#
-#     def segment_tomogram(model, volume_in):
-#         n_slices = volume_in.shape[0]
-#         volume_out = np.zeros_like(volume_in)
-#         for j in range(n_slices):
-#             m_slice = volume_in[j, :, :]
-#             m_slice = m_slice[np.newaxis, :, :]
-#             volume_out[j, :, :] = np.squeeze(model.predict(m_slice))
-#         return volume_out
-#
-#     def _thread(model_path, tomogram_paths, gpu_id, overwrite):
-#         os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-#
-#         windowless()
-#
-#         ais_model = SEModel()
-#         ais_model.load(model_path, compile=False)
-#         model_title = ais_model.title
-#         model = ais_model.model
-#         inference_model = clone_model(model, input_tensors=Input(shape=(None, None, 1)))
-#         for tomo in tomogram_paths:
-#             t_start = time.time()
-#             try:
-#                 out_path = os.path.join(project_configuration["root"], project_configuration["macromolecule_dir"], os.path.basename(os.path.splitext(tomo)[0]) + f"__{model_title}.mrc")
-#                 if not overwrite and os.path.exists(out_path):
-#                     continue
-#                 volume_in = mrcfile.read(tomo)
-#                 volume_in -= np.mean(volume_in)
-#                 volume_in /= np.std(volume_in)
-#                 volume_out = segment_tomogram(inference_model, volume_in)
-#                 with mrcfile.new(out_path, overwrite=True) as f:
-#                     f.set_data(volume_out.astype(np.float32))
-#                     f.voxel_size = project_configuration["apix"]
-#                 print(f"({tomogram_paths.index(tomo)}/{len(tomogram_paths)}) - {model_title} cost: {time.time() - t_start:.1f} seconds.")
-#             except Exception as e:
-#                 print(e)
-#
-#
-#     all_tomos = glob.glob(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], "*.mrc"))
-#     shuffle(all_tomos)
-#     _gpus = [int(j) for j in gpus.split(",")]
-#     data_div = {gpu: list() for gpu in _gpus}
-#     for gpu, tomo_path in zip(itertools.cycle(_gpus), all_tomos):
-#         data_div[gpu].append(tomo_path)
-#
-#     processes = []
-#     for gpu_id in data_div:
-#         p = multiprocessing.Process(target=_thread, args=(model_path, data_div[gpu_id], gpu_id, overwrite))
-#         processes.append(p)
-#         p.start()
-#     for p in processes:
-#         p.join()
-
-
 def phase_1_initialize():
     from Ais.core.se_frame import SEFrame
     from Ais.main import windowless
 
+    # TODO: possibly; way of improving trainign data for feature A is to include all boxes for all other features B when the annotation for B is all ones.
     os.makedirs(os.path.join(project_configuration['root'], "training_datasets"), exist_ok=True)
     os.makedirs(os.path.join(project_configuration['root'], "training_datasets", "phase1"), exist_ok=True)
+    os.makedirs(os.path.join(project_configuration['root'], "training_datasets", "phase1", "counter"), exist_ok=True)
 
     windowless()
 
     data = dict()
+    n_annotated_tomos = dict()
     for o in project_configuration['ontologies']:
+        n_annotated_tomos[o] = 0
         data[o] = dict()
         data[o]['y'] = list()
         for m in project_configuration['macromolecules']:
@@ -118,6 +49,7 @@ def phase_1_initialize():
             o = feature.title
             if o not in project_configuration['ontologies']:
                 continue
+            n_annotated_tomos[o] += 1
             print(f"\t{o}")
             for z in feature.boxes.keys():
                 for (j, k) in feature.boxes[z]:
@@ -143,15 +75,42 @@ def phase_1_initialize():
 
     # Save the data.
     for o in data:
+        n_annotated = 0
+        if len(data[o]['y']) == 0:
+            continue
         for m in data[o]:
             dataset = np.array(data[o][m])
             tifffile.imwrite(os.path.join(project_configuration['root'], "training_datasets", "phase1", f"{o}_{m}.tif"), dataset)
-        print(f"{o}: {dataset.shape[0]} training images.")
+            if m == 'y':
+                n_annotated = np.sum(np.sum(dataset, axis=(1, 2)) != 0)
+        print(f"{o}:{' '*(35 - len(o))}{dataset.shape[0]} training images (of which {n_annotated} annotated, {dataset.shape[0] - n_annotated} not) across {n_annotated_tomos[o]} volumes.")
 
-    print(f"Training datasets generated and saved to:\n\t{os.path.join(project_configuration['root'], 'training_datasets')}")
+    print()
+
+    # Save all boxes where annotation is full 1's, as extra negative examples for other classes
+    for o in data:
+        n_full_o_images = 0
+        counter_data = dict()
+        counter_data['y'] = list()
+        for m in project_configuration["macromolecules"]:
+            counter_data[m] = list()
+        for j in range(len(data[o]['y'])):
+            annotation = data[o]['y'][j]
+            if 0.0 not in annotation:
+                n_full_o_images += 1
+                counter_data['y'].append(np.zeros_like(annotation))
+                for m in project_configuration["macromolecules"]:
+                    counter_data[m].append(data[o][m][j])
+        if n_full_o_images > 0:
+            for m in counter_data:
+                dataset = np.array(counter_data[m])
+                tifffile.imwrite(os.path.join(project_configuration["root"], "training_datasets", "phase1", "counter", f"{o}_{m}.tif"), dataset)
+            print(f"{o}:{' '*(35 - len(o))}{dataset.shape[0]} counter-training images.")
+
+    print(f"Training datasets generated and saved to: \t/{os.path.join(project_configuration['root'], 'training_datasets')}")
 
 
-def phase_1_train(gpus, ontology):
+def phase_1_train(gpus, ontology, use_counterexamples=0):
     import tensorflow as tf
     import keras.callbacks
     from Pom.models.phase1model import create_model
@@ -170,11 +129,30 @@ def phase_1_train(gpus, ontology):
                 data_out.append(np.flip(_img, axis=0))
         return np.array(data_out)
 
-    data_y = add_redundancy(tifffile.imread(os.path.join(project_configuration['root'], "training_datasets", "phase1", f"{ontology}_y.tif")))
+    def load_data(channel='y'):
+        # load the original training data.
+        data_paths = [os.path.join(project_configuration['root'], "training_datasets", "phase1", f"{ontology}_{channel}.tif")]
+        if use_counterexamples == 1:
+            for o in project_configuration['ontologies']:
+                if ontology == o:
+                    continue
+                o_path = os.path.join(project_configuration['root'], "training_datasets", "phase1", "counter", f"{o}_{channel}.tif")
+                if os.path.exists(o_path):
+                    data_paths.append(o_path)
+        datasets = list()
+        for p in data_paths:
+            print(f"Loading: {p}")
+            datasets.append(tifffile.imread(p).astype(np.float32))
+        print()
+        datasets = np.concatenate(datasets)
+        return datasets
+
+    data_y = add_redundancy(load_data('y'))
+
     data_x = np.zeros((*data_y.shape, len(project_configuration['macromolecules'])))
 
     for j, m in enumerate(project_configuration['macromolecules']):
-        data_x[:, :, :, j] = add_redundancy(tifffile.imread(os.path.join(project_configuration['root'], "training_datasets", "phase1", f"{ontology}_{m}.tif")))
+        data_x[:, :, :, j] = add_redundancy(load_data(m))
 
     def tf_data_generator():
         n_samples = data_x.shape[0]
@@ -199,6 +177,7 @@ def phase_1_train(gpus, ontology):
 
     print(f"Training a model for {ontology} with inputs:")
     [print(f"\t{m}") for m in project_configuration['macromolecules']]
+    print(f"and {data_y.shape[0]} input images.")
 
     checkpoint_callback = keras.callbacks.ModelCheckpoint( filepath=os.path.join(project_configuration['root'], "models", "phase1", f"{ontology}_checkpoint.h5"), monitor='loss', mode='min', save_best_only=True)
     model.fit(training_data, epochs=project_configuration['single_model_epochs'], steps_per_epoch=data_x.shape[0] // project_configuration['single_model_batch_size'], shuffle=True, callbacks=[checkpoint_callback])
@@ -280,27 +259,26 @@ def phase_1_test(gpus, ontology, process=True):
 
 def phase_2_initialize(selective=False):
     """
-    :param selective: True to use only those images in the separate training datasets that have an annotation, and not fully negative training images.
+    :param selective: True to use only those images in the separate training datasets where at least 1 pixel was annotated.
     """
     import tensorflow as tf
     from scipy.ndimage import gaussian_filter
+    import gc
 
     os.makedirs(os.path.join(project_configuration['root'], "training_datasets", "phase2"), exist_ok=True)
 
-    def model_predict_with_redundancy(model, data_x):
-        prediction = np.zeros((data_x.shape[0], data_x.shape[1], data_x.shape[2], 1))
+    def model_predict_with_redundancy(m_model, m_data_x):
+        prediction = np.zeros((m_data_x.shape[0], m_data_x.shape[1], m_data_x.shape[2], 1))
 
-        # strategy = tf.distribute.MirroredStrategy()
-        # with strategy.scope():
         for k in [0, 1, 2, 3]:
-            d = np.rot90(data_x, k=k, axes=(1, 2))
-            _p = model.predict(d)
+            d = np.rot90(m_data_x, k=k, axes=(1, 2))
+            _p = m_model.predict(d)
             p = np.rot90(_p, k=-k, axes=(1, 2))
             prediction += p
 
             d = np.flip(d, axis=2)
-            _p = model.predict(d)
-            p = np.rot90(np.flip(_p, axis=2), k=-k, axes=(1,2))
+            _p = m_model.predict(d)
+            p = np.rot90(np.flip(_p, axis=2), k=-k, axes=(1, 2))
             prediction += p
         prediction /= 8
         prediction = np.squeeze(prediction)
@@ -340,7 +318,9 @@ def phase_2_initialize(selective=False):
         print(f"Applying model {o} to training data.")
         model = tf.keras.models.load_model(os.path.join(project_configuration["root"], "models", "phase1", f"{o}.h5"), compile=False)
         model_outputs[o] = model_predict_with_redundancy(model, data_x)
+        del model
         tf.keras.backend.clear_session()
+        gc.collect()
 
     # Now parse into a joint dataset.
     for j, m in enumerate(macromolecule_inputs):
@@ -361,7 +341,7 @@ def phase_2_initialize(selective=False):
 
         new_data_y[:, :, :, j] = model_y
     new_data_y[:, :, :, -1] = project_configuration['shared_model_unknown_class_threshold']
-    new_data_y = gaussian_filter(new_data_y, sigma=(3.0, 3.0), axes=(1, 2), mode='nearest')
+    new_data_y = gaussian_filter(new_data_y, sigma=(1.5, 1.5), axes=(1, 2), mode='nearest')
     max_indices = np.argmax(new_data_y, axis=-1)
     one_hot_y = np.zeros_like(new_data_y)
     J, K, L = np.indices(max_indices.shape)
@@ -440,97 +420,6 @@ def phase_2_train(gpus, checkpoint=''):
     checkpoint_callback = keras.callbacks.ModelCheckpoint(filepath=os.path.join(project_configuration["root"], "models", "phase2", f"CombinedOntologies_checkpoint.h5"), monitor='loss', mode='min', save_best_only=True)
     model.fit(training_data, epochs=project_configuration["shared_model_epochs"], steps_per_epoch=data_x.shape[0] // project_configuration["shared_model_batch_size"], shuffle=True, callbacks=[checkpoint_callback])
     model.save(os.path.join(project_configuration["root"], "models", "phase2", f"CombinedOntologies.h5"))
-
-#
-# def phase_2b_initialize(selective=True):
-#     import tensorflow as tf
-#
-#     def model_predict_with_redundancy(model, data_x, n_features_out):
-#         prediction = np.zeros((data_x.shape[0], data_x.shape[1], data_x.shape[2], n_features_out))
-#
-#         # strategy = tf.distribute.MirroredStrategy()
-#         # with strategy.scope():
-#         for k in [0, 1, 2, 3]:
-#             d = np.rot90(data_x, k=k, axes=(1, 2))
-#             _p = model.predict(d)
-#             p = np.rot90(_p, k=-k, axes=(1, 2))
-#             prediction += p
-#
-#             d = np.flip(d, axis=2)
-#             _p = model.predict(d)
-#             p = np.rot90(np.flip(_p, axis=2), k=-k, axes=(1, 2))
-#             prediction += p
-#         prediction /= 8
-#         prediction = np.squeeze(prediction)
-#         return prediction
-#
-#     os.makedirs(os.path.join(project_configuration["root"], "training_datasets", "phase2b"), exist_ok=True)
-#
-#     macromolecule_inputs = project_configuration["macromolecules"]
-#     ontologies = project_configuration["ontologies"]
-#
-#     data_x = list()
-#     data_y = list()
-#     data_m = list()
-#     for j, o in enumerate(ontologies):
-#         o_data_y = tifffile.imread(
-#             os.path.join(project_configuration["root"], "training_datasets", "phase1", f"{o}_y.tif"))
-#         o_data_x = np.zeros((*o_data_y.shape, len(macromolecule_inputs)))
-#         o_data_m = np.zeros((o_data_y.shape[0])) + j
-#         for k, m in enumerate(macromolecule_inputs):
-#             o_data_x[:, :, :, k] = tifffile.imread(
-#                 os.path.join(project_configuration["root"], "training_datasets", "phase1", f"{o}_{m}.tif"))
-#         if selective:
-#             selection = list()
-#             for k in range(o_data_y.shape[0]):
-#                 selection.append(np.sum(o_data_y[k, :, :]) > 0)
-#
-#             o_data_y = o_data_y[selection, :, :]
-#             o_data_x = o_data_x[selection, :, :, :]
-#             o_data_m = o_data_m[selection]
-#
-#         data_x.append(o_data_x)
-#         data_y.append(o_data_y)
-#         data_m.append(o_data_m)
-#
-#     data_x = np.concatenate(data_x, axis=0)
-#     data_y = np.concatenate(data_y, axis=0)
-#     data_m = np.concatenate(data_m, axis=0)
-#
-#     ontologies.append("Unknown")
-#
-#     strategy = tf.distribute.MirroredStrategy()
-#     with strategy.scope():
-#         model = tf.keras.models.load_model(
-#             os.path.join(project_configuration["root"], "models", "phase2", "CombinedOntologies.h5"), compile=False)
-#         model_output = model_predict_with_redundancy(model, data_x, len(ontologies))
-#
-#     train_in = model_output
-#     train_out = np.zeros(train_in.shape)
-#
-#     for j in range(model_output.shape[0]):
-#         # for every image, apply original labels.
-#         original_label = data_y[j, :, :]
-#         original_o = data_m[j]
-#         original_label_mask = np.where(original_label == 1, 0, 1)
-#         for k in range(model_output.shape[-1]):
-#             if k == original_o:
-#                 train_out[j, :, :, k] = original_label
-#             else:
-#                 train_out[j, :, :, k] = model_output[j, :, :, k] * original_label_mask
-#
-#
-#     for j, o in enumerate(ontologies):
-#         print(j, o)
-#         train_in_tif = np.squeeze(train_in[:, :, :, j]).astype(np.float32)
-#         tifffile.imwrite(os.path.join(project_configuration["root"], "training_datasets", "phase2b", f"in_{o}.tif"),
-#                          train_in_tif)
-#         train_out_tif = np.squeeze(train_out[:, :, :, j]).astype(np.float32)
-#         tifffile.imwrite(os.path.join(project_configuration["root"], "training_datasets", "phase2b", f"out_{o}.tif"),
-#                          train_out_tif)
-#
-#     print(f"Saved phase2 training data. Image sizes:\n\tin:  {train_in.shape}\n\tout: {train_out.shape}")
-#     print(f"Features:\n\tin:  {ontologies}\n\tout:  {ontologies}")
 
 
 def phase_2_process(gpus="0"):
@@ -711,7 +600,8 @@ def phase_3_summarize(overwrite=False, skip_macromolecules=False):
 
         tag = os.path.basename(f).split("__")[0]
         feature = os.path.splitext(os.path.basename(f))[0].split("__")[-1]
-
+        if feature not in project_configuration["macromolecules"] + project_configuration["ontologies"] + ["Unknown"]:
+            continue
         if tag not in data:
             data[tag] = dict()
 
@@ -723,15 +613,16 @@ def phase_3_summarize(overwrite=False, skip_macromolecules=False):
                     continue
 
         print(f"{i}/{len(files)}\t{feature}{' ' * (20 - len(feature))}{os.path.basename(f)}")
-        volume = mrcfile.read(f)
-        n_slices_margin = int(project_configuration["z_margin_summary"] * volume.data.shape[0])
+        volume = mrcfile.mmap(f).data
+        n_slices_margin = int(project_configuration["z_margin_summary"] * volume.shape[0])
         volume = volume[n_slices_margin:-n_slices_margin, :, :]
+
         if volume[0, 0, 0] == -1:  # then it's a placeholder volume.
             continue
         if volume.dtype == np.float32:
             data[tag][feature] = np.sum(volume) * 100.0 / np.prod(volume.shape)
         else:
-            data[tag][feature] = np.mean((volume > 128)) * 100.0 / np.prod(volume.shape)
+            data[tag][feature] = np.sum(volume) / 255.0 * 100.0 / np.prod(volume.shape)
 
     keys = sorted(list(data.keys()))
     sorted_data = dict()
@@ -795,7 +686,7 @@ def render_volumes(renderer, tomo_path, requested_compositions, feature_library,
                     t_start = time.time()
                     try:
                         feature_volume, pixel_size = get_volume(tomo_path, feature)
-                        if (feature in project_configuration["ontologies"] or feature == "Unknown") and project_configuration["raytraced_ontologies"]:
+                        if feature != "Lipid droplet" and (feature in project_configuration["ontologies"] or feature == "Unknown") and project_configuration["raytraced_ontologies"]:
                             renderables[feature] = VolumeModel(feature_volume, feature_library[feature], pixel_size)
                         else:
                             renderables[feature] = SurfaceModel(feature_volume, feature_library[feature], pixel_size)
@@ -973,10 +864,7 @@ def phase_3_projections(overwrite=False, parallel_processes=1):
                 n_slices_margin = int(project_configuration["z_margin_summary"] * mrc.data.shape[0])
                 data = copy.copy(mrc.data[n_slices_margin:-n_slices_margin, :, :])
                 data = gaussian_filter1d(data, sigma=3.0, axis=0)
-
             threshold = 0.5
-            if o == "Unknown":
-                threshold = project_configuration["shared_model_unknown_output_thresold"]
             data_mask = data > threshold
             images_xy[o] = np.sum(data_mask, axis=0)
             images_xz[o] = np.sum(data_mask, axis=1)

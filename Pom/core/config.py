@@ -27,11 +27,12 @@ def get_image(tomo, image, projection=False):
 
 def recolor(color, style=0):
     if style == 0:
-        return (np.array(color) / 2.0 + 0.5)
-    if style == 1:
-        return (np.array(color) / 8 + 0.875)
+        c = (np.array(color) / 2.0 + 0.5)
+    elif style == 1:
+        c = (np.array(color) / 8 + 0.875)
     else:
-        return color
+        c = color
+    return np.clip(c, 0.0, 1.0)
 
 
 def load_config():

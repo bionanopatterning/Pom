@@ -14,10 +14,12 @@ df = df.dropna(axis=0)
 
 
 def ontology_summary(df, ontology):
+    if not ontology in df:
+        return
     o_values = df[ontology]
-    best_n = 20
+    best_n = 10
     st.header(f"{ontology}")
-    # get highest and lowest valued images fo r this ontolgyo.
+    # get highest and lowest valued images for this.
     o_in_top3 = df.apply(lambda row: ontology in row.nlargest(5).index, axis=1).sum()
     st.markdown(f"**{ontology.capitalize()}** is a top 5  component in **{o_in_top3}** tomograms, with the total {ontology.lower()} volume in the full dataset equivalent to approximately **{df[ontology].sum() / 100.0:.0f}** original tomogram volumes.")
 
