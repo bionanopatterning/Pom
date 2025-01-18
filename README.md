@@ -1,4 +1,4 @@
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://github.com/bionanopatterning/Pom/blob/main/license.txt)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://github.com/bionanopatterning/Pom/blob/main/Pom/license.txt)
 [![Downloads](https://img.shields.io/pypi/dm/Pom-cryoET)](https://pypi.org/project/Pom-cryoET/)
 [![Documentation Status](https://readthedocs.org/projects/pom-cryoet/badge/?version=latest)](https://pom-cryoet.readthedocs.io/en/latest/?badge=latest)
 ![Last Commit](https://img.shields.io/github/last-commit/bionanopatterning/Pom)
