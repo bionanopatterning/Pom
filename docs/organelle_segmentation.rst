@@ -1,7 +1,7 @@
 Organelle segmentation
 __________
 
-The first step in the workflow is to segment macromolecules. Although this can be done with various tools, we used Ais and refer to the `Ais documentation<https://ais-cryoet.readthedocs.io/en/latest/>`_ for further information. In the following, we will assume that the selected set of macromolecule segmentations (as defined in the project configuration) is already available in the macromolecule directory (also as defined in the project configuration).
+The first step in the workflow is to segment macromolecules. Although this can be done with various tools, we used Ais and refer to the `Ais documentation <https://ais-cryoet.readthedocs.io/en/latest/>`_ for further information. In the following, we will assume that the selected set of macromolecule segmentations (as defined in the project configuration) is already available in the macromolecule directory (also as defined in the project configuration).
 
 The next step is then to train neural networks that output one of the selected organelles. To prepare the training data for these networks we also use Ais.
 

@@ -8,8 +8,8 @@ from setuptools import setup, find_packages
 # twine upload dist/*
 
 setup(
-    name='Pom',
-    version='0.0.1',
+    name='Pom-cryoET',
+    version='1.0.0',
     packages=find_packages(),
     entry_points={'console_scripts': ['pom=Pom.main:main']},
     license='GPL v3',
