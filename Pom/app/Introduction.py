@@ -29,11 +29,11 @@ def ontology_summary(df, ontology):
     c1, c2 = st.columns(2)
     with c1:
         top_caption_link = f"/Browse_tomograms?tomo_id={tomo_top}"
-        st.image(get_image(tomo_top, "density"), caption=f"High {ontology} content:", use_column_width=True)
+        st.image(get_image(tomo_top, "density"), caption=f"High {ontology} content:", use_container_width=True)
         st.markdown(f"<p style='text-align: center;margin-top: -20px;font-size: 13px;'><a href='{top_caption_link}'>{tomo_top}</a></p>", unsafe_allow_html=True)
     with c2:
         bot_caption_link = f"/Browse_tomograms?tomo_id={tomo_bot}"
-        st.image(get_image(tomo_bot, "density"), caption=f"Low {ontology} content:", use_column_width=True)
+        st.image(get_image(tomo_bot, "density"), caption=f"Low {ontology} content:", use_container_width=True)
         st.markdown(f"<p style='text-align: center;margin-top: -20px;font-size: 13px;'><a href='{bot_caption_link}'>{tomo_bot}</a></p>", unsafe_allow_html=True)
 
 c1, c2, c3 = st.columns([0.2, 0.6, 0.2])

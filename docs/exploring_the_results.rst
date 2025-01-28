@@ -7,7 +7,7 @@ Once all the segmentations are complete, a number of commands can be used to sum
 
    pom summarize
 
-This will generate an excel file that summarizes the composition of all tomograms.
+This will generate an excel file that summarizes the composition of all tomograms. By default, the summary includes values for both the organelle and the macromolecule segmentations. Use '-skip 1' to exclude the macromolecule segmentations.
 
 ::
 
@@ -26,4 +26,5 @@ This will generate 3D images of all tomograms. Multiple images will be generated
    pom browse
 
 
-Finally, pom browse will start the data browsing application. The IP address of the host is printed in the terminal; navigate here in a browser to explore the segmentation results.
+Finally, pom browse will start launch data browsing application. The IP address of the host is printed in the terminal; navigate here in a browser to explore the segmentation results.
+

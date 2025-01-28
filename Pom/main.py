@@ -46,6 +46,7 @@ def main():
     p3p = subparsers.add_parser('summarize', help='Summarize the dataset (or the fraction of the dataset processed so-far) in an Excel file.')
     p3p.add_argument('-overwrite', required=False, default=0, help='Specify whether to re-analyze volumes for which values are already found in the previous summary. Default is 0 (do not overwrite).')
     p3p.add_argument('-skip', '--skip-macromolecules', required=False, default=0, help='Specify whether to re-analyze volumes for which values are already found in the previous summary. Default is 0 (do not overwrite).')
+    p3p.add_argument('-feature', '--target-feature', required=False, default=None, help='When used, measure values for only this feature.')
 
     p4p = subparsers.add_parser('render', help='Render segmentations and output .png files.')
     p4p.add_argument('-c', '--configuration', required=False, default="", help='Path to a .json configuration file that specifies named compositions to render for each tomogram. If not supplied, default compositions are the top 3 ontologies and all macromolecules. ')
@@ -56,10 +57,16 @@ def main():
     p4p.add_argument('-p', '--processes', required=False, default=1, help='Number of parallel processing Renderer instances.')
 
     subparsers.add_parser('browse', help='Launch a local streamlit app to browse the summarized dataset.')
+
     p5p = subparsers.add_parser('projections', help='Launch a local streamlit app to browse the summarized dataset.')
     p5p.add_argument('-o', '--overwrite', required=False, default=0, help='Set to 1 to overwrite previously rendered images with the same render configuration. Default is 0.')
     p5p.add_argument('-p', '--processes', required=False, default=1, help='Number of parallel processing jobs. Default is 1, a higher value is likely faster.')
 
+    capp = subparsers.add_parser('capp', help='Context-aware particle picking')
+    capp.add_argument('-t', '--target', required=True, help='Particle type to perform CAPP for. Particle coordinate files are expected at root/capp/<target>;')
+    capp.add_argument('-w', '--window-size', required=False, default=16, help='Size (in pixels, at the same scale as the coordinates) of the context window.')
+    capp.add_argument('-b', '--bin-factor', required=False, default=2, help='Difference in the sizes of i) particle picking volumes, and ii) organelle segmentation volumes. If (i) is a Pom macromolecule segmentation, the value for -b should be 2 (default).')
+    capp.add_argument('-p', '--parallel', required=False, default=1, help='Number of parallel processes to run.')
 
     args = parser.parse_args()
     if args.command == 'single':
@@ -84,15 +91,16 @@ def main():
             gpus = cfg.project_configuration["GPUS"] if not args.gpus else args.gpus
             cli_fn.phase_2_process(gpus)
     elif args.command == 'summarize':
-        cli_fn.phase_3_summarize(overwrite=args.overwrite, skip_macromolecules=args.skip_macromolecules)
+        cli_fn.phase_3_summarize(overwrite=args.overwrite, skip_macromolecules=args.skip_macromolecules, target_feature=args.target_feature)
     elif args.command == 'render':
         cli_fn.phase_3_render(args.configuration, args.max_number, args.tomogram, args.overwrite, args.processes, args.feature_library_path)
     elif args.command == 'projections':
         cli_fn.phase_3_projections(args.overwrite, args.processes)
     elif args.command == 'browse':
         cli_fn.phase_3_browse()
-    # elif args.command == 'ais':
-    #     cli_fn.phase_0_segment(args.model_path, args.overwrite, args.gpus)
+    elif args.command == 'capp':
+        cli_fn.phase_3_capp(target=args.target, context_window_size=args.window_size, bin_factor=args.bin_factor, parallel=args.parallel)
+
 
 if __name__ == "__main__":
     main()

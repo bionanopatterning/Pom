@@ -23,7 +23,7 @@ After setting up the feature library, these presets can be used by right-clickin
 
 Single-feature networks
 ^^^^^^^^^^^^
-To begin preparing the training data, open any number of tomograms in Ais, and start annotating the various features and adding boxes, as you would in Ais when preparing training data for use in Ais itself. It is best to sample multiple different tomograms for training data, rather than prepare many annotations in a single tomogram. After adding some annotations to any one volume, save the annotated tomogram (ctrl + S, or via the top menu bar). Save the annotated tomograms in the project's tomogram folder.
+To begin preparing the training data, open any number of tomograms in Ais and start annotating the various features and adding boxes in the same way as you would in Ais when preparing training data for use in Ais itself. It is best to sample multiple different tomograms for training data, rather than prepare many annotations in a single tomogram. After adding some annotations to any one volume, save the annotated tomogram (ctrl + S, or via the top menu bar). Save the annotated tomograms in the project's tomogram folder to ensure that Pom can find them (quick saving an annotated tomogram with 'ctrl + S' saves the file in the same directory that the input .mrc is in).
 
 Once you're happy with the annotations and ready to try a first iteration of the segmentation, run the following command in the Pom project directory:
 
@@ -31,7 +31,7 @@ Once you're happy with the annotations and ready to try a first iteration of the
 
    pom single initialize
 
-This will loop over all .scns files in the tomogram directory and sample the training data for the various features. Then prepare the single-feature networks:
+This will loop over all annotated tomograms (.scns files) in the tomogram directory and sample the training data for the various features. Then prepare the single-feature networks:
 
 ::
 
@@ -48,7 +48,7 @@ The relevant parameters in the project configuration for this step are:
    "single_model_epochs": 100,               # the number of epochs (iterations over the full training dataset) to use
    "single_model_batch_size": 32,            # batch size to use during training
 
-During processing, input volumes are filtered along the z-axis by convolution with a window function. The "z_sum" value is radius of this window (i.e. the window will be 2 * 4 + 1 voxels in this example). This filter is also applied during the initialization of the training data.
+During processing, input volumes are filtered along the z-axis by convolution with a window function. The "z_sum" value is radius of this window (i.e. the window will be 2 * z + 1 voxels). This filter is also applied during the initialization of the training data.
 
 To test the resulting networks, save at least one tomogram in the test directory and run the following commands:
 

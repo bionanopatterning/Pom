@@ -6,7 +6,7 @@
 Welcome to the Pom documentation!
 ===============================
 
-This documentation is a work in progress. For questions, reach out to mlast@mrc-lmb.cam.ac.uk, or ask on our `GitHub page <https://github.com/bionanopatterning/Pom>`_. Asking questions on GitHub is preferred, as it allows others to read the Q&A as well.
+For questions, reach out to mlast@mrc-lmb.cam.ac.uk, or ask on our `GitHub page <https://github.com/bionanopatterning/Pom>`_. Asking questions on GitHub is preferred, as it allows others to read the Q&A as well.
 
 Table of contents
 __________

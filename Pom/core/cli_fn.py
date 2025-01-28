@@ -257,6 +257,7 @@ def phase_1_test(gpus, ontology, process=True):
     for p in processes:
         p.join()
 
+
 def phase_2_initialize(selective=False):
     """
     :param selective: True to use only those images in the separate training datasets where at least 1 pixel was annotated.
@@ -521,65 +522,8 @@ def phase_2_process(gpus="0"):
         p.join()
 
 
-def phase_3_measure_thickness(overwrite=False):
-    from numpy.random import shuffle
-    import pandas as pd
-    N_BINS_XY = 8
-    THRESHOLDS = [0.3, 0.5, 0.7]
-
-    def measure_thickness(tomo_name):
-        void_path = os.path.join(project_configuration["root"], project_configuration["output_dir"], f"{tomo_name}__Void.mrc")
-        if not os.path.exists(void_path):
-            return 500.0, 500.0
-        # get void segmentation
-        data = mrcfile.read(os.path.join(project_configuration["root"], project_configuration["output_dir"], f"{tomo_name}__Void.mrc"))
-        n_slices, k, l = data.shape
-        data = data[:, :(k//N_BINS_XY)*N_BINS_XY, :(l//N_BINS_XY)*N_BINS_XY].reshape((n_slices, N_BINS_XY, k//N_BINS_XY, N_BINS_XY, l//N_BINS_XY)).mean(3).mean(1)
-
-        measurement_sets = dict()
-        for t in THRESHOLDS:
-            measurement_sets[t] = list()
-        n_measurements = 0
-        for j in range(N_BINS_XY):
-            for k in range(N_BINS_XY):
-                for t in THRESHOLDS:
-                    void_line = data[:, j, k]
-                    # find where the line crosses 0.5
-                    crossings = np.where(np.diff(np.sign(void_line - t)))[0]
-                    # find the closest crossing to the left of the center
-                    left_crossings = crossings[crossings < n_slices // 2]
-                    right_crossings = crossings[crossings > n_slices // 2]
-                    if len(left_crossings) == 1 and len(right_crossings) == 1:
-                        measurement_sets[t].append((right_crossings[0] - left_crossings[0]) * project_configuration["apix"] * 2.0 / 10.0)
-                        n_measurements += 1
-        measurement_failed = False
-        thickness = list()
-        for t in measurement_sets.values():
-            if len(t) == 0:
-                return 500.0, 500.0
-            thickness.append(np.mean(t))
-        return np.mean(thickness), np.std(thickness)
-
-
-    summary_path = os.path.join(project_configuration["root"], 'summary.xlsx')
-    df = pd.read_excel(summary_path, index_col=0)
-
-    all_tomograms = glob.glob(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], "*.mrc"))
-    shuffle(all_tomograms)
-
-    measurements = dict()
-    for j, tomo in enumerate(all_tomograms):
-        tomo_name = os.path.basename(os.path.splitext(tomo)[0])
-        m, s = measure_thickness(tomo_name)
-        print(f"({j}/{len(all_tomograms)}) - measured {int(m)} nm with {int(s)} nm error in {tomo}")
-        measurements[tomo_name] = measure_thickness(tomo_name)
-
-    df["Thickness (nm)"] = df.index.map(lambda x: measurements.get(x, (500.0, 500.0))[0])
-    df["Thickness error (nm)"] = df.index.map(lambda x: measurements.get(x, (500.0, 500.0))[1])
-    df.to_excel(summary_path, index=True, index_label="Tomogram")
-
-
-def phase_3_summarize(overwrite=False, skip_macromolecules=False):
+def phase_3_summarize(overwrite=False, skip_macromolecules=False, target_feature=None):
+    ## TODO: add argument to measure a specific feature only.
     import pandas as pd
 
     data_directories = [project_configuration["output_dir"]]
@@ -601,6 +545,8 @@ def phase_3_summarize(overwrite=False, skip_macromolecules=False):
         tag = os.path.basename(f).split("__")[0]
         feature = os.path.splitext(os.path.basename(f))[0].split("__")[-1]
         if feature not in project_configuration["macromolecules"] + project_configuration["ontologies"] + ["Unknown"]:
+            continue
+        if target_feature is not None and feature != target_feature:
             continue
         if tag not in data:
             data[tag] = dict()
@@ -931,3 +877,68 @@ def phase_3_projections(overwrite=False, parallel_processes=1):
 
 def phase_3_browse():
     os.system(f"streamlit run {os.path.join(os.path.dirname(os.path.dirname(__file__)), 'app', 'Introduction.py')}")
+
+
+def phase_3_capp(target, context_window_size, bin_factor, parallel):
+    import multiprocessing
+    import itertools
+    from copy import copy
+
+    def _capp_job(tomo, target, context_window_size, bin_factor):
+        features = project_configuration["ontologies"] + ["Unknown"]
+
+        coordinates = list()
+        coordinate_path = os.path.join(project_configuration["root"], "capp", f"{target}", f"{tomo}__{target}_coords.tsv")
+        with open(coordinate_path, 'r') as f:
+            for line in f:
+                c = line.split('\t')
+                coordinates.append((int(c[0]), int(c[1]), int(c[2])))
+
+        out_lines = list()
+        out_header = "Z\tY\tX"
+        context_volumes = dict()
+        for f in features:
+            out_header += f"\t{f}"
+            context_volumes[f] = mrcfile.mmap(os.path.join(project_configuration["root"], project_configuration["output_dir", f"{tomo}__{f}.mrc"])).data
+        out_header += "\n"
+
+        w = context_window_size // 2 // bin_factor
+        for c in coordinates:
+            l, k, j = c
+
+            out_lines.append(f"{l}\t{k}\t{j}")
+
+            l //= bin_factor
+            k //= bin_factor
+            j //= bin_factor
+
+            for f in context_volumes:
+                v_context = copy(context_volumes[f][j-w:j+w+1, k-w:k+w+1, l-w:l+w+1])
+                v_context = np.mean(v_context)
+                out_lines[-1] += f"\t{v_context:.5f}"
+
+            out_lines[-1] += "\n"
+
+        with open(os.path.join(project_configuration["root"], "capp", f"{target}", "result", f"{tomo}__{target}_coords.tsv"), 'w') as f:
+            f.write(out_header)
+            f.writelines(out_lines)
+
+    def _capp_thread(tomos, thread_id, target, context_window_size, bin_factor):
+        for j, p in enumerate(tomos):
+            _capp_job(p, target, context_window_size, bin_factor)
+            print(f"{j+1}/{len(tomos)} (thread {thread_id}) - {p}")
+
+    os.makedirs(os.path.join(project_configuration["root"], "capp", f"{target}", "result"), exist_ok=True)
+
+    tomos = [os.path.basename(f).split('__')[0] for f in os.path.join(project_configuration["root"], "capp", f"{target}", "*.tsv")]
+    print(f"Found {len(tomos)} coordinate files in {os.path.join(project_configuration['root'], 'capp', f'{target}')}")
+
+    process_div = {p: list() for p in range(parallel)}
+    for p, tomo in zip(itertools.cycle(range(parallel)), tomos):
+        process_div[p].append(tomo)
+    processes = list()
+    for p in process_div:
+        processes.append(multiprocessing.Process(target=_capp_thread, args=(process_div[p], p, target, context_window_size, bin_factor)))
+        processes[-1].start()
+    for p in processes:
+        p.join()

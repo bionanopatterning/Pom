@@ -39,12 +39,13 @@ def recolor(color, style=0):
 
 feature_library = parse_feature_library("feature_library.txt")
 
+
 @st.cache_data
 def load_data():
     cache_df = pd.read_excel(os.path.join(project_configuration["root"], "summary.xlsx"), index_col=0)
     cache_df = cache_df.dropna(axis=0)
     to_drop = list()
-    for f in project_configuration["macromolecules"] + ["Thickness (nm)", "Thickness error (nm)"]:
+    for f in project_configuration["macromolecules"]:
         if f in cache_df.columns:
             to_drop.append(f)
     cache_df = cache_df.drop(columns=to_drop)
@@ -60,6 +61,17 @@ def rank_distance_series(tomo_name, rank_df):
     distances = rank_df.apply(lambda row: np.sum((row - m_ranks)**2), axis=1)
     sorted_distances = distances.sort_values()
     return sorted_distances
+
+
+def open_in_ais(tomo_name):
+    cmd_path = os.path.join(os.path.expanduser("~"), ".Ais", "pom_to_ais.cmd")
+    tomo_dir = os.path.join(project_configuration["root"], project_configuration["tomogram_dir"])
+    with open(cmd_path, 'a') as f:
+        base = os.path.abspath(os.path.join(tomo_dir, f"{tomo_name}"))
+        if os.path.exists(base+".scns"):
+            f.write(f"open\t{base+'.scns'}\n")
+        else:
+            f.write(f"open\t{base + '.mrc'}\n")
 
 # Query params
 tomo_name = df.index[0]
@@ -86,7 +98,44 @@ with column_base:
             tomo_name = tomo_names[idx]
             st.query_params["tomo_id"] = tomo_name
 
-    tomo_title_field = st.markdown(f'<div style="text-align: center;font-size: 30px;"><b>{tomo_name}\n\n</b></div>', unsafe_allow_html=True)
+    tomo_title_field = st.markdown(f'<div style="text-align: center;font-size: 30px;margin-bottom: 0; margin-top: 0;"><b>{tomo_name}\n\n</b></div>', unsafe_allow_html=True)
+
+    # ---------------------------------------
+    # Center a single smaller button
+    # ---------------------------------------
+    # 1) Put the button in the middle column,
+    #    so it's horizontally centered in the page.
+    # 2) Inject CSS that targets only this button
+    #    based on its label, "Open in AIS".
+    # ---------------------------------------
+    st.markdown(
+        """
+        <style>
+        button[kind="secondary"],
+        button[kind="secondary"] * {
+            border: none !important;
+            background-color: transparent !important;
+            box-shadow: none !important;
+            font-size: 0.8rem !important;
+            padding: 0 !important;
+            margin: 0 auto !important;
+            width: auto !important;
+            min-width: 0 !important;
+            text-align: center !important;
+            color: #333 !important; /* Adjust text color as desired */
+            cursor: pointer !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    col1, col2, col3 = st.columns([4, 2, 4])
+    with col2:
+        if st.button("Open in Ais", type="secondary"):
+            open_in_ais(tomo_name)
+
+
     c1, c2, c3 = st.columns([5, 5, 5])
     with c1:
         st.image(get_image(tomo_name, "density").transpose(Image.FLIP_TOP_BOTTOM), use_container_width=True,
