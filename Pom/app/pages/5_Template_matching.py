@@ -87,7 +87,6 @@ def generate_template_previews(job_config, n_samples=18):
     transforms = Pommie.typedefs.Transform.sample_unit_sphere(n_samples=job_config["transform_n"],
                                                               polar_lims=(polar_min_rad, polar_max_rad))
     transforms = random.sample(transforms, min(len(transforms), n_samples))
-    print(transforms)
     templates = template.resample(transforms)
     template_masks = template_mask.resample(transforms)
     n = template.n
@@ -97,11 +96,10 @@ def generate_template_previews(job_config, n_samples=18):
         template_j_2d = templates[j].data[n//2, :, :]
         template_mask_j_2d = template_masks[j].data[n//2, :, :]
         image_pairs.append((template_j_2d, template_mask_j_2d))
-        print(j)
     return image_pairs
 
 
-def generate_mask_preview():
+def generate_mask_preview(job_config):
     # grab a random tomo central slice
     tomos = glob.glob(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], "*.mrc"))
     tomo = random.sample(tomos, 1)[0]
@@ -114,6 +112,7 @@ def generate_mask_preview():
     slice_pxd /= np.std(slice_pxd)
     slice_pxd = (slice_pxd + 2.0) / 4.0
 
+    stride = job_config["stride"]
     available_features = project_configuration["ontologies"] + ["Unknown"]
     for f in st.session_state.area_filters:
         if f.o not in available_features:
@@ -151,7 +150,9 @@ def generate_mask_preview():
             mask = np.logical_and(mask, np.logical_not(f.mask))
 
     mask = mask * 255
-
+    for j in range(stride-1):
+        mask[1+j::stride, :] = 0
+        mask[:, 1+j::stride] = 0
     return slice_pxd, mask
 
 
@@ -160,7 +161,7 @@ def save_job(job_config):
     job_config["selection_criteria"] = list()
     for f in st.session_state.area_filters:
         if f.active:
-            job_config.append(f.to_dict())
+            job_config["selection_criteria"].append(f.to_dict())
 
     # save required files
     job_path = os.path.join(project_configuration["root"], "astm", job_config["job_name"], "config.json")
@@ -181,7 +182,7 @@ def new_job():
     job_config["stride"] = c1.number_input("Stride", value=1, min_value=1)
 
     c2.subheader("Transform")
-    job_config["transform_n"] = c2.number_input("Number of transforms", value=256, min_value=1, max_value=500)
+    job_config["transform_n"] = c2.number_input("Number of transforms", value=500, min_value=1, max_value=500)
     job_config["transform_polar_min"] = c2.number_input("Polar angle start", value=-90, min_value=-90, max_value=90)
     job_config["transform_polar_max"] = c2.number_input("Polar angle stop", value=90, min_value=-90, max_value=90)
 
@@ -193,7 +194,9 @@ def new_job():
 
     if c3.columns([2, 3 * 0.75, 2])[1].button("Preview templates", use_container_width=True, type="primary"):
         with st.expander("Template previews (random subset)", expanded=True):
-            previews = generate_template_previews(job_config, n_samples=TEMPLATE_PREVIEW_ROWS * TEMPLATE_PREVIEW_COLS)
+            with st.spinner("Generating previews..."):
+                previews = generate_template_previews(job_config, n_samples=TEMPLATE_PREVIEW_ROWS * TEMPLATE_PREVIEW_COLS)
+
             i = 0
             for k in range(TEMPLATE_PREVIEW_ROWS):
                 for j, c in enumerate(st.columns(TEMPLATE_PREVIEW_COLS)):
@@ -215,7 +218,7 @@ def new_job():
 
     st.subheader("Area selection")
     for f in st.session_state.area_filters:
-        c0, c1, c2, c3, c4, c5, c6 = st.columns([1, 3, 0.75, 1.0, 3, 0.25, 0.25], vertical_alignment="bottom")
+        c0, c1, c2, c3, c4, c5, c6 = st.columns([0.2, 2, 0.75, 1.5, 4.0, 0.25, 0.25], vertical_alignment="bottom")
         with c1:
             f.o = st.selectbox("Feature", options=project_configuration["ontologies"] + ["Unknown"], key=f"{f.id}selectbox")
         with c2:
@@ -224,25 +227,25 @@ def new_job():
             f.logic = st.segmented_control("Inclusion mode\n", options=["include", "exclude"], default="include", key=f"{f.id}inclusion")
         with c4:
             _c0, _c1, _c2, _c3 = st.columns([1, 1, 2, 2], vertical_alignment="bottom")
-            f.active = _c0.toggle("Active", value=False, key=f"{f.id}active")
+            f.active = _c0.toggle("Active", value=True, key=f"{f.id}active")
             f.edge = _c1.toggle("Edge", value=False, key=f"{f.id}edge")
-            f.edge_in = _c2.number_input("Inside (nm)", value=10.0, key=f"{f.id}edge_in", disabled=not f.edge)
-            f.edge_out = _c3.number_input("Outside (nm)", value=10.0, key=f"{f.id}edge_out", disabled=not f.edge)
+            f.edge_in = _c2.number_input("Inside (nm)", value=10.0, step=5.0, key=f"{f.id}edge_in", disabled=not f.edge)
+            f.edge_out = _c3.number_input("Outside (nm)", value=10.0, step=5.0, key=f"{f.id}edge_out", disabled=not f.edge)
         with c6:
             if st.button(":material/Close:", key=f"{f.id}close", type="tertiary"):
                 st.session_state.area_filters.remove(f)
                 st.rerun()
     "\n"
-    if st.columns([3, 0.5, 3])[1].button("Add criterion", use_container_width=True, type="secondary"):
+    if st.columns([3, 1.0, 3])[1].button("Add criterion", use_container_width=True, type="secondary"):
         st.session_state.area_filters.append(AreaFilter())
         st.rerun()
 
     "\n"
 
     if len(st.session_state.area_filters) > 0:
-        preview_slice, preview_mask = generate_mask_preview()
+        preview_slice, preview_mask = generate_mask_preview(job_config)
         with st.columns([1, 4, 1])[1]:
-            with st.expander("Template previews (random subset)", expanded=True):
+            with st.expander("Slice & mask preview (random tomogram)", expanded=True):
                 c1, c2 = st.columns([2, 2])
                 with c1:
                     st.image(preview_slice, clamp=True, use_container_width=True)
@@ -260,22 +263,36 @@ def new_job():
 
 
 def view_job(job_name):
-    pass
-
+    job_config_path = os.path.join(project_configuration["root"], "astm", job_name, "config.json")
+    st.subheader(f"Instructions")
+    st.text(f"Start or continue template matching:")
+    st.code(f"pom astm run {job_name}")
+    st.text(f"Detect particles via matching score:")
+    st.code(f"pom astm pick {job_config_path}")
+    # how to run job info
+    # results?
+    # progress?
 
 def clear_job_query():
     st.query_params = dict()
 
 
 available_jobs = [os.path.basename(os.path.dirname(f)) for f in glob.glob(os.path.join(project_configuration["root"], "astm", "*", "config.json"))]
+available_jobs = ["Create new job"] + available_jobs
+
+selected_job = available_jobs[0]
 if "job_name" in st.query_params:
     selected_job = st.query_params["job_name"]
 
+selected_job_idx = 0
+if selected_job in available_jobs:
+    selected_job_idx = available_jobs.index(selected_job)
+
 c1, c2, c3 = st.columns([4, 3, 1])
 with c1:
-    st.header("Area-selective template matching")
+    st.header(selected_job)
 with c3:
-    selected_job = st.selectbox("Select job", options=["Create new job"] + available_jobs, on_change=clear_job_query)
+    selected_job = st.selectbox("Select job", options=available_jobs, on_change=clear_job_query, index=selected_job_idx)
 st.divider()
 
 if selected_job == "Create new job":

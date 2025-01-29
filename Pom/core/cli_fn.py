@@ -942,3 +942,108 @@ def phase_3_capp(target, context_window_size, bin_factor, parallel):
         processes[-1].start()
     for p in processes:
         p.join()
+
+
+def phase_3_astm(config_file_path, overwrite, save_indices=False, save_masks=False):
+    import Pommie
+    Pommie.compute.initialize()
+
+    if not os.path.isabs(config_file_path) and not os.path.exists(config_file_path):
+        config_file_path = os.path.abspath(os.path.join(project_configuration["root"], "astm", f"{config_file_path}", "config.json"))
+
+    def generate_volume_mask(tomo, job_config):
+        selection_criteria = job_config["selection_criteria"]
+
+        masks = list()
+        for rule in selection_criteria:
+            feature_path = os.path.join(project_configuration["root"], project_configuration["output_dir"], f"{tomo}__{rule['feature']}.mrc")
+            vol = Pommie.typedefs.Volume.from_path(feature_path)
+            if rule["edge"]:
+                vol = vol.to_shell_mask(rule["threshold"], int(10 * rule["edge_out"] / vol.apix), int(10 * rule["edge_in"] / vol.apix))
+            else:
+                vol = vol.threshold(rule["threshold"])
+
+            masks.append(vol)
+
+        out_mask = np.zeros_like(masks[-1].data)
+        for m, rule in zip(masks, selection_criteria):
+            if rule["logic"] == "include":
+                out_mask = np.logical_or(out_mask, m.data)
+        for m, rule in zip(masks, selection_criteria):
+            if rule["logic"] == "exclude":
+                out_mask = np.logical_and(out_mask, np.logical_not(m.data))
+
+        out_mask = Pommie.typedefs.Volume.from_array(out_mask, apix=masks[-1].apix)
+
+        if job_config["template_binning"] == 1:
+            out_mask = out_mask.unbin(2)
+        else:
+            out_mask = out_mask.bin(int(job_config["template_binning"] / 2))
+
+        return out_mask
+
+
+
+    job_dir = os.path.dirname(config_file_path)
+    with open(config_file_path, 'r') as f:
+        job_config = json.load(f)
+
+    polar_min_rad = (job_config["transform_polar_min"]) * np.pi / 180.0
+    polar_max_rad = (job_config["transform_polar_max"]) * np.pi / 180.0
+    transforms = Pommie.typedefs.Transform.sample_unit_sphere(n_samples=job_config["transform_n"],
+                                                              polar_lims=(polar_min_rad, polar_max_rad))
+
+    template = Pommie.typedefs.Particle.from_path(job_config["template_path"])
+    template = template.bin(job_config["template_binning"])
+    template = Pommie.compute.gaussian_filter([template], sigma=job_config["template_blur"])[0]
+
+    template_mask = Pommie.typedefs.Particle.from_path(job_config["template_mask_path"])
+    template_mask = template_mask.bin(job_config["template_binning"])
+
+    spherical_mask = Pommie.typedefs.Mask(template)
+    spherical_mask.spherical(radius_px=spherical_mask.n // 2)
+    template.data *= spherical_mask.data
+    template_mask.data *= spherical_mask.data
+
+    Pommie.compute.set_tm2d_n(n=template.n)
+
+    tomos = [os.path.basename(os.path.splitext(f)[0]) for f in glob.glob(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], f"*.mrc"))]
+    np.random.shuffle(tomos)
+    skip_binding = False
+
+    for j, t in enumerate(tomos):
+        out_path = os.path.join(job_dir, f"{t}__score.mrc")
+        t_start = time.time()
+        if os.path.exists(out_path) and not overwrite:
+            print(f"{j+1}/{len(tomos)} - skipping {t} as output exists.")
+        else:
+            with mrcfile.new(out_path, overwrite=True) as f:
+                f.set_data(np.zeros((10, 10, 10), dtype=np.float32) - 1)
+
+        volume_mask = generate_volume_mask(t, job_config)  # binning volume_mask is handled inside here
+        volume = Pommie.typedefs.Volume.from_path(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], f"{t}.mrc"))
+        volume.bin(job_config["template_binning"])
+
+        scores, indices = Pommie.compute.find_template_in_volume(volume=volume,
+                                                                 volume_mask=volume_mask,
+                                                                 template=template,
+                                                                 template_mask=template_mask,
+                                                                 transforms=transforms,
+                                                                 dimensionality=2,
+                                                                 stride=job_config["stride"],
+                                                                 skip_binding=skip_binding,
+                                                                 verbose=False)
+        skip_binding = True  # only need to bind once; first compute.find_template_in_volume call will do it.
+        print(f"{j + 1}/{len(tomos)} ({time.time() - t_start:.2f} seconds)- {t}")
+        with mrcfile.new(out_path, overwrite=True) as f:
+            f.set_data(scores)
+            f.voxel_size = volume.apix
+        if save_indices:
+            with mrcfile.new(out_path.split("__")[0]+"__indices.mrc", overwrite=True) as f:
+                f.set_data(indices)
+                f.voxel_size = volume.apix
+        if save_masks:
+            with mrcfile.new(out_path.split("__")[0]+"__mask.mrc", overwrite=True) as f:
+                f.set_data(volume_mask.data.astype(np.float32))
+                f.voxel_size = volume_mask.apix
+

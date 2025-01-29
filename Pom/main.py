@@ -15,17 +15,17 @@ def main():
     p1sp = p1p.add_subparsers(dest='phase1_command', help='Single-model commands')
     p1sp.add_parser('initialize', help='Initialize the training data for selected annotations.')
 
-    p1sp_train = p1sp.add_parser('train', help='Train a single-ontology output model for a selected ontology.')
-    p1sp_train.add_argument('-ontology', required=True, help='The ontology for which to train a network.')
+    p1sp_train = p1sp.add_parser('train', help='Train a single-feature output model for a selected feature.')
+    p1sp_train.add_argument('-o', '--ontology', required=True, help='The feature for which to train a network.')
     p1sp_train.add_argument('-gpus', required=False, help='Which GPUs to use, e.g. "0,1,2,3" for GPU 0-3. If used, overrides the GPU usage set in the project configuration.')
     p1sp_train.add_argument('-c', '--counterexamples', required=False, default=0, help='(1 or 0 (default)). Whether or not to use negative image examples taken from datasets for other features. Images that are annotated as fully A can be used to instruct a model for feature B that that image is fully not B.')
 
-    p1sp_test = p1sp.add_parser('test', help='Test a single-ontology output model for a selected ontology.')
-    p1sp_test.add_argument('-ontology', required=True, help='The ontology for which to test the trained network.')
+    p1sp_test = p1sp.add_parser('test', help='Test a single-feature output model for a selected feature.')
+    p1sp_test.add_argument('-o', '--ontology', required=True, help='The feature for which to test the trained network.')
     p1sp_test.add_argument('-gpus', required=False, help='Which GPUs to use, e.g. "0,1,2,3" for GPU 0-3. If used, overrides the GPU usage set in the project configuration.')
 
-    p1sp_process = p1sp.add_parser('process', help='Process all volumes using a single-ontology output model for a selected ontology.')
-    p1sp_process.add_argument('-ontology', required=True, help='Which feature to segment.')
+    p1sp_process = p1sp.add_parser('process', help='Process all volumes using a single-featyre output model for a selected feature.')
+    p1sp_process.add_argument('-o', '-ontology', required=True, help='Which feature to segment.')
     p1sp_process.add_argument('-gpus', required=False, help='Which GPUs to use, e.g. "0,1,2,3" for GPU 0-3. If used, overrides the GPU usage set in the project configuration.')
 
     # Shared model commands
@@ -62,11 +62,23 @@ def main():
     p5p.add_argument('-o', '--overwrite', required=False, default=0, help='Set to 1 to overwrite previously rendered images with the same render configuration. Default is 0.')
     p5p.add_argument('-p', '--processes', required=False, default=1, help='Number of parallel processing jobs. Default is 1, a higher value is likely faster.')
 
-    capp = subparsers.add_parser('capp', help='Context-aware particle picking')
+    capp = subparsers.add_parser('capp', help='Context-aware particle picking.')
     capp.add_argument('-t', '--target', required=True, help='Particle type to perform CAPP for. Particle coordinate files are expected at root/capp/<target>;')
     capp.add_argument('-w', '--window-size', required=False, default=16, help='Size (in pixels, at the same scale as the coordinates) of the context window.')
     capp.add_argument('-b', '--bin-factor', required=False, default=2, help='Difference in the sizes of i) particle picking volumes, and ii) organelle segmentation volumes. If (i) is a Pom macromolecule segmentation, the value for -b should be 2 (default).')
     capp.add_argument('-p', '--parallel', required=False, default=1, help='Number of parallel processes to run.')
+
+
+
+    p1sp.add_parser('initialize', help='Initialize the training data for selected annotations.')
+    astm = subparsers.add_parser('astm', help="Area-selective template matching.")
+    astm_parser = astm.add_subparsers(dest='astm_command', help="ASTM commands")
+
+    astm_run = astm_parser.add_parser('run', help="Run ASTM jobs.")
+    astm_run.add_argument('-c', '--config', required=True, help="Job name, or path to a config.json job definition file.")
+    astm_run.add_argument('-o', '--overwrite', required=False, default=1, help="Overwrite (1) or skip (0) tomos for which previous output exists.")
+    astm_run.add_argument('-indices', '--save-indices', required=False, default=1, help="Whether to save the matching template indices to a separate output .mrc.")
+    astm_run.add_argument('-masks', '--save-masks', required=False, default=1, help="Whether to save the volume mask to a separate output .mrc.")
 
     args = parser.parse_args()
     if args.command == 'single':
@@ -100,7 +112,9 @@ def main():
         cli_fn.phase_3_browse()
     elif args.command == 'capp':
         cli_fn.phase_3_capp(target=args.target, context_window_size=args.window_size, bin_factor=args.bin_factor, parallel=args.parallel)
-
+    elif args.command == 'astm':
+        if args.astm_command == 'run':
+            cli_fn.phase_3_astm(args.config, args.overwrite, args.save_indices, args.save_masks)
 
 if __name__ == "__main__":
     main()
