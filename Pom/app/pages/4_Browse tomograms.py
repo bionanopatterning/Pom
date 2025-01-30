@@ -20,8 +20,9 @@ with open("project_configuration.json", 'r') as f:
 def get_image(tomo, image, projection=False):
     image_dir = image.split("_")[0]
     if projection:
-        image_dir += "_projection"
-    img_path = os.path.join(project_configuration["image_dir"], image_dir, f"{tomo}_{image}.png")
+        img_path = os.path.join(project_configuration["root"], project_configuration["image_dir"], f"{image_dir}_projection", f"{tomo}_{image}.png")
+    else:
+        img_path = os.path.join(project_configuration["root"], project_configuration["image_dir"], image_dir, f"{tomo}_{image}.png")
     if os.path.exists(img_path):
         return Image.open(img_path)
     else:
@@ -52,6 +53,7 @@ def load_data():
     cache_rank_df = cache_df.rank(axis=0, ascending=False)
 
     return cache_df, cache_rank_df
+
 
 df, rank_df = load_data()
 
@@ -98,41 +100,29 @@ with column_base:
             tomo_name = tomo_names[idx]
             st.query_params["tomo_id"] = tomo_name
 
-    tomo_title_field = st.markdown(f'<div style="text-align: center;font-size: 30px;margin-bottom: 0; margin-top: 0;"><b>{tomo_name}\n\n</b></div>', unsafe_allow_html=True)
-
-    # ---------------------------------------
-    # Center a single smaller button
-    # ---------------------------------------
-    # 1) Put the button in the middle column,
-    #    so it's horizontally centered in the page.
-    # 2) Inject CSS that targets only this button
-    #    based on its label, "Open in AIS".
-    # ---------------------------------------
-    st.markdown(
-        """
-        <style>
-        button[kind="secondary"],
-        button[kind="secondary"] * {
-            border: none !important;
-            background-color: transparent !important;
-            box-shadow: none !important;
-            font-size: 0.8rem !important;
-            padding: 0 !important;
-            margin: 0 auto !important;
-            width: auto !important;
-            min-width: 0 !important;
-            text-align: center !important;
-            color: #333 !important; /* Adjust text color as desired */
-            cursor: pointer !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-
-    col1, col2, col3 = st.columns([4, 2, 4])
-    with col2:
-        if st.button("Open in Ais", type="secondary"):
+    tomo_title_field = st.markdown(f'<div style="text-align: center;font-size: 30px;margin-bottom: 0; margin-top: 0;"><b>{tomo_name}</b></div>', unsafe_allow_html=True)
+    # m = st.markdown("""
+    # <style>
+    # button[kind="primary"] {
+    #     box-shadow:inset 0px 1px 0px 0px #fce2c1;
+    #     background:linear-gradient(to bottom, #ffc477 5%, #fb9e25 100%);
+    #     background-color:#ffc477;
+    #     border-radius:6px;
+    #     border:1px solid #eeb44f;
+    #     display:inline-block;
+    #     cursor:pointer;
+    #     color:#ffffff;
+    #     font-family:Arial;
+    #     font-size:15px;
+    #     font-weight:bold;
+    #     padding:6px 4px !important;
+    #     text-decoration:none;
+    #     text-shadow:0px 1px 0px #cc9f52;
+    # }
+    # </style>""", unsafe_allow_html=True)
+    " "
+    if os.path.exists(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], f"{tomo_name}.mrc")):
+        if st.columns([6, 2, 6])[1].button("Open in Ais", type="primary", use_container_width=True):
             open_in_ais(tomo_name)
 
 

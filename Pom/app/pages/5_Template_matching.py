@@ -16,6 +16,29 @@ st.set_page_config(
     layout='wide'
 )
 
+
+
+st.markdown(
+    """
+    <style>
+    [data-testid="stSliderTickBarMax"] {
+        display: none !important; /* Completely hide the element */
+        visibility: hidden !important; /* Alternative: Make it invisible but keep its space */
+    }
+    
+    [data-testid="stSliderTickBarMin"] {
+        display: none !important; /* Completely hide the element */
+        visibility: hidden !important; /* Alternative: Make it invisible but keep its space */
+    }
+    
+    [data-testid="stSliderTickBar"] {
+        height: 18px !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 st.markdown(
     """
     <style>
@@ -99,10 +122,10 @@ def generate_template_previews(job_config, n_samples=18):
     return image_pairs
 
 
-def generate_mask_preview(job_config):
+def generate_mask_preview(job_config, tomo_idx):
     # grab a random tomo central slice
     tomos = glob.glob(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], "*.mrc"))
-    tomo = random.sample(tomos, 1)[0]
+    tomo = tomos[tomo_idx]
     print(tomo)
     tomo_name = os.path.splitext(os.path.basename(tomo))[0]
 
@@ -218,16 +241,18 @@ def new_job():
 
     st.subheader("Area selection")
     for f in st.session_state.area_filters:
-        c0, c1, c2, c3, c4, c5, c6 = st.columns([0.2, 2, 0.75, 1.5, 4.0, 0.25, 0.25], vertical_alignment="bottom")
+        c0, c0b, c1, c2, c3, c4, c5, c6 = st.columns([0.2, 0.8, 1.4, 1.3, 1.0, 3.0, 0.25, 0.25], vertical_alignment="bottom")
+        with c0b:
+            f.active = st.toggle("Active", value=True, key=f"{f.id}active")
         with c1:
             f.o = st.selectbox("Feature", options=project_configuration["ontologies"] + ["Unknown"], key=f"{f.id}selectbox")
         with c2:
-            f.threshold = st.number_input("Threshold", value=0.5, min_value=0.0, max_value=1.0, key=f"{f.id}threshold", format="%0.5f")
+            #f.threshold = st.number_input("Threshold", value=0.5, min_value=0.0, max_value=1.0, key=f"{f.id}threshold", format="%0.5f")
+            f.threshold = st.slider("Threshold", value=0.5, min_value=0.0, max_value=1.0, key=f"{f.id}threshold")
         with c3:
             f.logic = st.segmented_control("Inclusion mode\n", options=["include", "exclude"], default="include", key=f"{f.id}inclusion")
         with c4:
-            _c0, _c1, _c2, _c3 = st.columns([1, 1, 2, 2], vertical_alignment="bottom")
-            f.active = _c0.toggle("Active", value=True, key=f"{f.id}active")
+            _c0, _c1, _c2, _c3 = st.columns([0.25, 1, 2, 2], vertical_alignment="bottom")
             f.edge = _c1.toggle("Edge", value=False, key=f"{f.id}edge")
             f.edge_in = _c2.number_input("Inside (nm)", value=10.0, step=5.0, key=f"{f.id}edge_in", disabled=not f.edge)
             f.edge_out = _c3.number_input("Outside (nm)", value=10.0, step=5.0, key=f"{f.id}edge_out", disabled=not f.edge)
@@ -243,14 +268,22 @@ def new_job():
     "\n"
 
     if len(st.session_state.area_filters) > 0:
-        preview_slice, preview_mask = generate_mask_preview(job_config)
         with st.columns([1, 4, 1])[1]:
-            with st.expander("Slice & mask preview (random tomogram)", expanded=True):
+            with st.expander("Slice & mask preview", expanded=True):
+                n_tomos = len(glob.glob(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], f"*.mrc")))
+                if "tomo_idx" not in st.session_state:
+                    st.session_state.tomo_idx = np.random.randint(0, n_tomos - 1, 1)[0]
+                tomo_idx = st.slider("Test tomogram index", min_value=0, max_value=n_tomos - 1, value=st.session_state.tomo_idx, step=1)
+                if tomo_idx != st.session_state.tomo_idx:
+                    st.session_state.tomo_idx = tomo_idx
+                preview_slice, preview_mask = generate_mask_preview(job_config, tomo_idx)
                 c1, c2 = st.columns([2, 2])
                 with c1:
                     st.image(preview_slice, clamp=True, use_container_width=True)
                 with c2:
                     st.image(preview_mask, clamp=True, use_container_width=True)
+
+                # select tomogram to perview
 
     st.divider()
 
@@ -263,12 +296,10 @@ def new_job():
 
 
 def view_job(job_name):
-    job_config_path = os.path.join(project_configuration["root"], "astm", job_name, "config.json")
-    st.subheader(f"Instructions")
     st.text(f"Start or continue template matching:")
-    st.code(f"pom astm run {job_name}")
+    st.code(f"pom astm run -c {job_name}")
     st.text(f"Detect particles via matching score:")
-    st.code(f"pom astm pick {job_config_path}")
+    st.code(f"pom astm pick -c {job_name}")
     # how to run job info
     # results?
     # progress?
@@ -290,7 +321,7 @@ if selected_job in available_jobs:
 
 c1, c2, c3 = st.columns([4, 3, 1])
 with c1:
-    st.header(selected_job)
+    st.header("Area-selective template matching")
 with c3:
     selected_job = st.selectbox("Select job", options=available_jobs, on_change=clear_job_query, index=selected_job_idx)
 st.divider()

@@ -856,7 +856,7 @@ def phase_3_projections(overwrite=False, parallel_processes=1):
 
     def _thread(tomo_list):
         for j, t in enumerate(tomo_list):
-            print(f"{j}/{len(tomo_list)} {os.path.splitext(os.path.basename(t))[0]}")
+            print(f"{j+1}/{len(tomo_list)} {os.path.splitext(os.path.basename(t))[0]}")
             process_tomogram(t)
 
     parallel_processes = int(parallel_processes)
@@ -899,13 +899,14 @@ def phase_3_capp(target, context_window_size, bin_factor, parallel):
         context_volumes = dict()
         for f in features:
             out_header += f"\t{f}"
-            context_volumes[f] = mrcfile.mmap(os.path.join(project_configuration["root"], project_configuration["output_dir", f"{tomo}__{f}.mrc"])).data
+            context_volumes[f] = mrcfile.mmap(os.path.join(project_configuration["root"], project_configuration["output_dir"], f"{tomo}__{f}.mrc")).data
         out_header += "\n"
 
         w = context_window_size // 2 // bin_factor
         for c in coordinates:
             l, k, j = c
-
+            if l < context_window_size // 2 or k < context_window_size // 2 or j < context_window_size // 2:
+                continue
             out_lines.append(f"{l}\t{k}\t{j}")
 
             l //= bin_factor
@@ -930,21 +931,25 @@ def phase_3_capp(target, context_window_size, bin_factor, parallel):
 
     os.makedirs(os.path.join(project_configuration["root"], "capp", f"{target}", "result"), exist_ok=True)
 
-    tomos = [os.path.basename(f).split('__')[0] for f in os.path.join(project_configuration["root"], "capp", f"{target}", "*.tsv")]
+    tomos = [os.path.basename(f).split('__')[0] for f in glob.glob(os.path.join(project_configuration["root"], "capp", f"{target}", "*.tsv"))]
     print(f"Found {len(tomos)} coordinate files in {os.path.join(project_configuration['root'], 'capp', f'{target}')}")
 
-    process_div = {p: list() for p in range(parallel)}
-    for p, tomo in zip(itertools.cycle(range(parallel)), tomos):
-        process_div[p].append(tomo)
-    processes = list()
-    for p in process_div:
-        processes.append(multiprocessing.Process(target=_capp_thread, args=(process_div[p], p, target, context_window_size, bin_factor)))
-        processes[-1].start()
-    for p in processes:
-        p.join()
+    parallel_processes = int(parallel)
+    if parallel_processes == 1:
+        _capp_thread(tomos, 0, target=target, context_window_size=context_window_size, bin_factor=bin_factor)
+    else:
+        process_div = {p: list() for p in range(parallel)}
+        for p, tomo in zip(itertools.cycle(range(parallel)), tomos):
+            process_div[p].append(tomo)
+        processes = list()
+        for p in process_div:
+            processes.append(multiprocessing.Process(target=_capp_thread, args=(process_div[p], p, target, context_window_size, bin_factor)))
+            processes[-1].start()
+        for p in processes:
+            p.join()
 
 
-def phase_3_astm(config_file_path, overwrite, save_indices=False, save_masks=False):
+def phase_3_astm_run(config_file_path, overwrite, save_indices=False, save_masks=False, tomo=None):
     import Pommie
     Pommie.compute.initialize()
 
@@ -1007,8 +1012,11 @@ def phase_3_astm(config_file_path, overwrite, save_indices=False, save_masks=Fal
 
     Pommie.compute.set_tm2d_n(n=template.n)
 
-    tomos = [os.path.basename(os.path.splitext(f)[0]) for f in glob.glob(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], f"*.mrc"))]
-    np.random.shuffle(tomos)
+    if tomo is not None:
+        tomos = [os.path.splitext(tomo)[0]]
+    else:
+        tomos = [os.path.basename(os.path.splitext(f)[0]) for f in glob.glob(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], f"*.mrc"))]
+        np.random.shuffle(tomos)
     skip_binding = False
 
     for j, t in enumerate(tomos):
@@ -1046,4 +1054,53 @@ def phase_3_astm(config_file_path, overwrite, save_indices=False, save_masks=Fal
             with mrcfile.new(out_path.split("__")[0]+"__mask.mrc", overwrite=True) as f:
                 f.set_data(volume_mask.data.astype(np.float32))
                 f.voxel_size = volume_mask.apix
+
+
+def phase_3_astm_pick(config_file_path, threshold, spacing, spacing_px=None, parallel=1):
+    from Ais.core.util import peak_local_max
+    import itertools
+    import multiprocessing
+
+    if not os.path.isabs(config_file_path) and not os.path.exists(config_file_path):
+        config_file_path = os.path.abspath(os.path.join(project_configuration["root"], "astm", f"{config_file_path}", "config.json"))
+
+    data_directory = os.path.dirname(config_file_path)
+    output_directory = os.path.join(data_directory, "coordinates")
+
+    os.makedirs(output_directory, exist_ok=True)
+
+    all_data_paths = glob.glob(os.path.join(data_directory, "*__score.mrc"))
+
+    def _picking_thread(data_paths, output_directory, threshold, spacing, spacing_px=None, thread_id=0):
+        for j, p in enumerate(data_paths):
+            out_path = os.path.join(output_directory, os.path.basename(os.path.splitext(p)[0])+"_coords.tsv")
+
+            with mrcfile.open(p) as f:
+                vol = f.data
+                pxs = f.voxel_size
+
+            min_distance = int((spacing / pxs)) if spacing_px is None else spacing_px
+            coordinates = peak_local_max(vol, min_distance=min_distance, threshold_abs=threshold)
+            with open(out_path, 'w') as f:
+                for c in coordinates:
+                    f.write(f"{c[0]}\t{c[1]}\t{c[2]}\n")
+
+            print(f"{j+1}/{len(data_paths)} (thread {thread_id}) - {len(coordinates)} particles in {out_path}")
+
+    data_div = {p_id: list() for p_id in range(parallel)}
+    for p_id, p in zip(itertools.cycle(range(parallel)), all_data_paths):
+        data_div[p_id].append(p)
+
+    if parallel == 1:
+        _picking_thread(all_data_paths, output_directory, threshold, spacing, spacing_px, 1)
+    else:
+        processes = []
+        for p_id in data_div:
+            p = multiprocessing.Process(target=_picking_thread,
+                                        args=(data_div[p_id], output_directory, threshold, spacing, spacing_px, p_id))
+            processes.append(p)
+            p.start()
+
+        for p in processes:
+            p.join()
 

@@ -64,9 +64,9 @@ def main():
 
     capp = subparsers.add_parser('capp', help='Context-aware particle picking.')
     capp.add_argument('-t', '--target', required=True, help='Particle type to perform CAPP for. Particle coordinate files are expected at root/capp/<target>;')
-    capp.add_argument('-w', '--window-size', required=False, default=16, help='Size (in pixels, at the same scale as the coordinates) of the context window.')
-    capp.add_argument('-b', '--bin-factor', required=False, default=2, help='Difference in the sizes of i) particle picking volumes, and ii) organelle segmentation volumes. If (i) is a Pom macromolecule segmentation, the value for -b should be 2 (default).')
-    capp.add_argument('-p', '--parallel', required=False, default=1, help='Number of parallel processes to run.')
+    capp.add_argument('-w', '--window-size', required=False, default=16, type=int, help='Size (in pixels, at the same scale as the coordinates) of the context window.')
+    capp.add_argument('-b', '--bin-factor', required=False, default=2, type=int, help='Difference in the sizes of i) particle picking volumes, and ii) organelle segmentation volumes. If (i) is a Pom macromolecule segmentation, the value for -b should be 2 (default).')
+    capp.add_argument('-p', '--parallel', required=False, default=1, type=int, help='Number of parallel processes to run.')
 
 
 
@@ -79,6 +79,14 @@ def main():
     astm_run.add_argument('-o', '--overwrite', required=False, default=1, help="Overwrite (1) or skip (0) tomos for which previous output exists.")
     astm_run.add_argument('-indices', '--save-indices', required=False, default=1, help="Whether to save the matching template indices to a separate output .mrc.")
     astm_run.add_argument('-masks', '--save-masks', required=False, default=1, help="Whether to save the volume mask to a separate output .mrc.")
+    astm_run.add_argument('-t', '--tomo-name', required=False, default=None, help="Select a specific tomogram to process")
+
+    astm_run = astm_parser.add_parser('pick', help="Pick particles from ASTM score volumes.")
+    astm_run.add_argument('-c', '--config', required=True, help="Job name, or path to a config.json job definition file.")
+    astm_run.add_argument('-threshold', required=True, type=float, help="Minimum matching score to be considered an instance of the tempalte particle.")
+    astm_run.add_argument('-spacing', '--minimum-spacing', required=False, type=float, default=1, help="Minimum inter-particle spacing (in Angstrom)")
+    astm_run.add_argument('-spacing-px', '--minimum-spacing-px', required=False, type=int, default=1, help="Minimum inter-particle spacing (in pixels - overrides '-spacing')")
+    astm_run.add_argument('-p', '--parallel', required=False, default=1, type=int, help="Number of parallel processes to run (one or two per CPU is good; e.g. '-p 16')")
 
     args = parser.parse_args()
     if args.command == 'single':
@@ -114,7 +122,10 @@ def main():
         cli_fn.phase_3_capp(target=args.target, context_window_size=args.window_size, bin_factor=args.bin_factor, parallel=args.parallel)
     elif args.command == 'astm':
         if args.astm_command == 'run':
-            cli_fn.phase_3_astm(args.config, args.overwrite, args.save_indices, args.save_masks)
+            cli_fn.phase_3_astm_run(args.config, args.overwrite, args.save_indices, args.save_masks, args.tomo_name)
+        if args.astm_command == 'pick':
+            cli_fn.phase_3_astm_pick(args.config, args.threshold, args.minimum_spacing, args.minimum_spacing_px, args.parallel)
+
 
 if __name__ == "__main__":
     main()

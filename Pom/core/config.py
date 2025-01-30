@@ -13,6 +13,7 @@ if not os.path.exists(project_configuration_json_path):
     shutil.copy(os.path.join(os.path.dirname(__file__), "render_configuration.json"), os.path.join(os.getcwd(), "render_configuration.json"))
     print(f"created render_configuration.json at {os.path.join(os.getcwd(), 'render_configuration.json')}")
 
+
 def get_image(tomo, image, projection=False):
     image_dir = image.split("_")[0]
     if projection:
