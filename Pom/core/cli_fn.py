@@ -1000,7 +1000,8 @@ def phase_3_astm_run(config_file_path, overwrite, save_indices=False, save_masks
 
     template = Pommie.typedefs.Particle.from_path(job_config["template_path"])
     template = template.bin(job_config["template_binning"])
-    template = Pommie.compute.gaussian_filter([template], sigma=job_config["template_blur"])[0]
+    if job_config["template_blur"] > 0:
+        template = Pommie.compute.gaussian_filter([template], sigma=job_config["template_blur"])[0]
 
     template_mask = Pommie.typedefs.Particle.from_path(job_config["template_mask_path"])
     template_mask = template_mask.bin(job_config["template_binning"])
@@ -1056,10 +1057,11 @@ def phase_3_astm_run(config_file_path, overwrite, save_indices=False, save_masks
                 f.voxel_size = volume_mask.apix
 
 
-def phase_3_astm_pick(config_file_path, threshold, spacing, spacing_px=None, parallel=1):
+def phase_3_astm_pick(config_file_path, threshold, spacing, spacing_px=None, parallel=1, max_particles_per_tomogram=1e9, blur_kernel_px=0):
     from Ais.core.util import peak_local_max
     import itertools
     import multiprocessing
+    from scipy.ndimage import gaussian_filter1d
 
     if not os.path.isabs(config_file_path) and not os.path.exists(config_file_path):
         config_file_path = os.path.abspath(os.path.join(project_configuration["root"], "astm", f"{config_file_path}", "config.json"))
@@ -1068,10 +1070,9 @@ def phase_3_astm_pick(config_file_path, threshold, spacing, spacing_px=None, par
     output_directory = os.path.join(data_directory, "coordinates")
 
     os.makedirs(output_directory, exist_ok=True)
+    all_data_paths = list(filter(lambda f: os.path.getsize(f) > 10000, glob.glob(os.path.join(data_directory, "*__score.mrc"))))
 
-    all_data_paths = glob.glob(os.path.join(data_directory, "*__score.mrc"))
-
-    def _picking_thread(data_paths, output_directory, threshold, spacing, spacing_px=None, thread_id=0):
+    def _picking_thread(data_paths, output_directory, threshold, spacing, spacing_px=None, thread_id=0, max_per_tomogram=1e9, blur_kernel_px=0):
         for j, p in enumerate(data_paths):
             out_path = os.path.join(output_directory, os.path.basename(os.path.splitext(p)[0])+"_coords.tsv")
 
@@ -1079,28 +1080,70 @@ def phase_3_astm_pick(config_file_path, threshold, spacing, spacing_px=None, par
                 vol = f.data
                 pxs = f.voxel_size
 
+            if blur_kernel_px > 0:
+                vol = gaussian_filter1d(vol, sigma=blur_kernel_px, axis=0)
+
             min_distance = int((spacing / pxs)) if spacing_px is None else spacing_px
             coordinates = peak_local_max(vol, min_distance=min_distance, threshold_abs=threshold)
+            n_picked = 0
             with open(out_path, 'w') as f:
                 for c in coordinates:
+                    n_picked += 1
                     f.write(f"{c[0]}\t{c[1]}\t{c[2]}\n")
-
-            print(f"{j+1}/{len(data_paths)} (thread {thread_id}) - {len(coordinates)} particles in {out_path}")
+                    if n_picked >= max_per_tomogram:
+                        break
+            print(f"{j+1}/{len(data_paths)} (thread {thread_id}) - {n_picked} particles in {out_path}")
 
     data_div = {p_id: list() for p_id in range(parallel)}
     for p_id, p in zip(itertools.cycle(range(parallel)), all_data_paths):
         data_div[p_id].append(p)
 
     if parallel == 1:
-        _picking_thread(all_data_paths, output_directory, threshold, spacing, spacing_px, 1)
+        _picking_thread(all_data_paths, output_directory, threshold, spacing, spacing_px, 1, max_particles_per_tomogram, blur_kernel_px)
     else:
         processes = []
         for p_id in data_div:
             p = multiprocessing.Process(target=_picking_thread,
-                                        args=(data_div[p_id], output_directory, threshold, spacing, spacing_px, p_id))
+                                        args=(data_div[p_id], output_directory, threshold, spacing, spacing_px, p_id, max_particles_per_tomogram, blur_kernel_px))
             processes.append(p)
             p.start()
 
         for p in processes:
             p.join()
 
+    # parse everything to a big overview file with columns:     x   y   z   score   index   tomo
+    coordinate_files = glob.glob(os.path.join(data_directory, "coordinates", "*.tsv"))
+    particles = list()
+
+    class Particle:
+        def __init__(self):
+            self.x = 0
+            self.y = 0
+            self.z = 0
+            self.score = 0
+            self.tomo = 0
+            self.t_idx = 0
+
+        def __str__(self):
+            return f"{self.x}\t{self.y}\t{self.z}\t{self.score}\t{self.tomo}\t{self.t_idx}\n"
+
+    for cf in coordinate_files:
+        tomo_name = os.path.splitext(os.path.basename(cf))[0].split("__")[0]
+        mmap = mrcfile.mmap(os.path.join(data_directory, f"{tomo_name}__score.mrc"))
+        idx_mmap = mrcfile.mmap(os.path.join(data_directory, f"{tomo_name}__indices.mrc"))
+        with open(cf, 'r') as f:
+            lines = f.readlines()
+        for l in lines:
+            vals = l.split("\n")[0].split("\t")
+            p = Particle()
+            p.z = int(vals[0])
+            p.y = int(vals[1])
+            p.x = int(vals[2])
+            p.score = mmap.data[p.z, p.y, p.x]
+            p.t_idx = idx_mmap.data[p.z, p.y, p.x]
+            p.tomo = tomo_name
+            particles.append(p)
+
+    with open(os.path.join(data_directory, "all_particles.tsv"), 'w') as f:
+        for p in particles:
+            f.write(f"{p}")

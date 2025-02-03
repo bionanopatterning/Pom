@@ -84,8 +84,10 @@ def main():
     astm_run = astm_parser.add_parser('pick', help="Pick particles from ASTM score volumes.")
     astm_run.add_argument('-c', '--config', required=True, help="Job name, or path to a config.json job definition file.")
     astm_run.add_argument('-threshold', required=True, type=float, help="Minimum matching score to be considered an instance of the tempalte particle.")
+    astm_run.add_argument('-max', required=False, type=int, default=1e9, help="Maximum number of particles to pick per tomogram (default 1e9)")
     astm_run.add_argument('-spacing', '--minimum-spacing', required=False, type=float, default=1, help="Minimum inter-particle spacing (in Angstrom)")
     astm_run.add_argument('-spacing-px', '--minimum-spacing-px', required=False, type=int, default=1, help="Minimum inter-particle spacing (in pixels - overrides '-spacing')")
+    astm_run.add_argument('-blur', '--blur-px', required=False, default=0, type=int, help="Apply a Gaussian blur along the Z direction with -blur <sigma_px>. Can be useful to reduce false positives (though possibly at the cost of introducing false negatives).")
     astm_run.add_argument('-p', '--parallel', required=False, default=1, type=int, help="Number of parallel processes to run (one or two per CPU is good; e.g. '-p 16')")
 
     args = parser.parse_args()
@@ -124,7 +126,7 @@ def main():
         if args.astm_command == 'run':
             cli_fn.phase_3_astm_run(args.config, args.overwrite, args.save_indices, args.save_masks, args.tomo_name)
         if args.astm_command == 'pick':
-            cli_fn.phase_3_astm_pick(args.config, args.threshold, args.minimum_spacing, args.minimum_spacing_px, args.parallel)
+            cli_fn.phase_3_astm_pick(args.config, args.threshold, args.minimum_spacing, args.minimum_spacing_px, args.parallel, args.max, args.blur_px)
 
 
 if __name__ == "__main__":

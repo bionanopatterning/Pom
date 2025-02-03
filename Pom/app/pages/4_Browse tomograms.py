@@ -86,21 +86,21 @@ _, column_base, _ = st.columns([3, 15, 3])
 with column_base:
     c1, c2, c3 = st.columns([1, 19, 1])
     with c1:
-        if st.button("<"):
+        if st.button(":material/Keyboard_Arrow_Left:"):
             idx = tomo_names.index(tomo_name)
             idx = (idx - 1) % len(tomo_names)
             tomo_name = tomo_names[idx]
             st.query_params["tomo_id"] = tomo_name
-    with c2:
-        tomo_title_field = st.empty()
     with c3:
-        if st.button("\>"):
+        if st.button(":material/Keyboard_Arrow_Right:"):
             idx = tomo_names.index(tomo_name)
             idx = (idx + 1) % len(tomo_names)
             tomo_name = tomo_names[idx]
             st.query_params["tomo_id"] = tomo_name
+    with c2:
+        tomo_title_field = st.markdown(f'<div style="text-align: center;font-size: 30px;margin-bottom: 0; margin-top: 0;"><b>{tomo_name}</b></div>', unsafe_allow_html=True)
 
-    tomo_title_field = st.markdown(f'<div style="text-align: center;font-size: 30px;margin-bottom: 0; margin-top: 0;"><b>{tomo_name}</b></div>', unsafe_allow_html=True)
+
     # m = st.markdown("""
     # <style>
     # button[kind="primary"] {
