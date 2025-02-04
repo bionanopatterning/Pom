@@ -59,5 +59,17 @@ Then convert the score volumes into coordinates with:
 
    pom astm pick -c <job_name> -threshold <threshold> -spacing-px <minimum particle spacing in pixel units> -p <number of parallel processes to run, e.g. 16>
 
-The Pom browser template matching job page will automatically keep up to date with the progress of the job. You can inspect the resulting score volumes and particle picks there.
+The Pom browser template matching job page will automatically keep up to date with the progress of the job. You can inspect the resulting score volumes and particle picks there. The 'Score volumes' tab displays the job progress and can be used to inspect the results for the completed volumes:
+
+.. image:: ./res/astm_job_1.png
+   :alt: ASTM Job progress 1
+   :align: center
+   :width: 100%
+
+And in the 'Detected particle' tabs you can see the picked particles. If the Pom browser is running locally (from the root directory of the project), the 'open in Ais' button can be used to open the corresponding tomogram in Ais and set it to the slice in which the particle was located. In the example below we targeted TRiC particles - the match with the highest score was in fact the instance that was used as the tempalte.
+
+.. image:: ./res/astm_job_2.png
+   :alt: ASTM Job progress 2
+   :align: center
+   :width: 100%
 
