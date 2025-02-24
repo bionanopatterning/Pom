@@ -21,6 +21,7 @@ __________
    exploring_the_results
    context-aware_particle_picking
    area-selective_template_matching
+   network_weights
 
 Introduction
 __________
