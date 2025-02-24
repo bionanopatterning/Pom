@@ -10,11 +10,12 @@ import copy
 from Pom.core.config import project_configuration, FeatureLibraryFeature, feature_library, parse_feature_library
 import shutil
 
+# TODO: add 'filter tomos by <void, cyto. etc.> option'
+
 def phase_1_initialize():
     from Ais.core.se_frame import SEFrame
     from Ais.main import windowless
 
-    # TODO: possibly; way of improving trainign data for feature A is to include all boxes for all other features B when the annotation for B is all ones.
     os.makedirs(os.path.join(project_configuration['root'], "training_datasets"), exist_ok=True)
     os.makedirs(os.path.join(project_configuration['root'], "training_datasets", "phase1"), exist_ok=True)
     os.makedirs(os.path.join(project_configuration['root'], "training_datasets", "phase1", "counter"), exist_ok=True)
@@ -32,10 +33,13 @@ def phase_1_initialize():
 
     annotated_datasets = glob.glob(os.path.join(project_configuration['root'], project_configuration['tomogram_dir'], "*.scns"))
     for j, scns in enumerate(annotated_datasets):
-        print(f"Annotated dataset {j}/{len(annotated_datasets)}: {os.path.basename(scns)}")
-        with open(scns, 'rb') as pf:
-            se_frame = pickle.load(pf)
-
+        print(f"Annotated dataset {j+1}/{len(annotated_datasets)}: {os.path.basename(scns)}")
+        try:
+            with open(scns, 'rb') as pf:
+                se_frame = pickle.load(pf)
+        except Exception as e:
+            print(f"\terror loading {j}\n\t{e}")
+            continue
         tomo_name = os.path.splitext(os.path.basename(scns))[0]
         macromolecules = dict()
         for m in project_configuration["macromolecules"]:
@@ -72,6 +76,8 @@ def phase_1_initialize():
                                 else:
                                     m_img = m_img / 255.0 * 2.0 - 1.0
                                 data[o][m].append(m_img)
+
+    print()
 
     # Save the data.
     for o in data:
@@ -110,7 +116,12 @@ def phase_1_initialize():
     print(f"Training datasets generated and saved to: \t/{os.path.join(project_configuration['root'], 'training_datasets')}")
 
 
-def phase_1_train(gpus, ontology, use_counterexamples=0):
+def phase_1_train(gpus, ontology, use_counterexamples=0, all_features=0):
+    if all_features == 1:
+        for f in project_configuration["ontologies"]:
+            phase_1_train(gpus=gpus, ontology=f, use_counterexamples=use_counterexamples, all_features=0)
+        return
+
     import tensorflow as tf
     import keras.callbacks
     from Pom.models.phase1model import create_model
@@ -179,7 +190,7 @@ def phase_1_train(gpus, ontology, use_counterexamples=0):
     [print(f"\t{m}") for m in project_configuration['macromolecules']]
     print(f"and {data_y.shape[0]} input images.")
 
-    checkpoint_callback = keras.callbacks.ModelCheckpoint( filepath=os.path.join(project_configuration['root'], "models", "phase1", f"{ontology}_checkpoint.h5"), monitor='loss', mode='min', save_best_only=True)
+    checkpoint_callback = keras.callbacks.ModelCheckpoint(filepath=os.path.join(project_configuration['root'], "models", "phase1", f"{ontology}_checkpoint.h5"), monitor='loss', mode='min', save_best_only=True)
     model.fit(training_data, epochs=project_configuration['single_model_epochs'], steps_per_epoch=data_x.shape[0] // project_configuration['single_model_batch_size'], shuffle=True, callbacks=[checkpoint_callback])
     shutil.move(os.path.join(project_configuration["root"], "models", "phase1", f"{ontology}_checkpoint.h5"), os.path.join(project_configuration["root"], "models", "phase1", f"{ontology}.h5"))
     print(f'Saved: {os.path.join(project_configuration["root"], "models", "phase1", f"{ontology}.h5")}')
@@ -229,7 +240,7 @@ def phase_1_test(gpus, ontology, process=True):
         for nl, l in zip(inference_model.layers, trained_model.layers):
             nl.set_weights(l.get_weights())
 
-        for tomo in tomogram_paths:
+        for j, tomo in enumerate(tomogram_paths):
             t_start = time.time()
             try:
                 out_name = os.path.join(output_directory, os.path.basename(os.path.splitext(tomo)[0])+f"__{ontology}.mrc")
@@ -237,7 +248,7 @@ def phase_1_test(gpus, ontology, process=True):
                 with mrcfile.new(out_name, overwrite=True) as f:
                     f.set_data(vol_out.astype(np.float32))
                     f.voxel_size = project_configuration["apix"] * 2
-                print(f"{tomogram_paths.index(tomo)+1}/{len(tomogram_paths)}: {ontology} cost: {time.time() - t_start:.1f} seconds.")
+                print(f"(GPU {gpu_id}) {j+1}/{len(tomogram_paths)}: {ontology} cost: {time.time() - t_start:.1f} seconds.")
             except Exception as e:
                 print(e)
 
@@ -316,8 +327,8 @@ def phase_2_initialize(selective=False):
 
     model_outputs = dict()
     for o in ontologies:
-        print(f"Applying model {o} to training data.")
         model = tf.keras.models.load_model(os.path.join(project_configuration["root"], "models", "phase1", f"{o}.h5"), compile=False)
+        print(f"Applying model {o} to training data.")
         model_outputs[o] = model_predict_with_redundancy(model, data_x)
         del model
         tf.keras.backend.clear_session()
@@ -482,7 +493,7 @@ def phase_2_process(gpus="0"):
         for nl, l in zip(inference_model.layers, trained_model.layers):
             nl.set_weights(l.get_weights())
 
-        for tomo in tomogram_paths:
+        for j, tomo in enumerate(tomogram_paths):
             t_start = time.time()
             try:
                 out_name = os.path.join(project_configuration["root"], project_configuration['output_dir'], os.path.basename(os.path.splitext(tomo)[0])+f"__{ontology_names[0]}.mrc")
@@ -500,7 +511,7 @@ def phase_2_process(gpus="0"):
                     with mrcfile.new(os.path.join(project_configuration["root"], project_configuration['output_dir'], os.path.basename(os.path.splitext(tomo)[0])+f"__{o}.mrc"), overwrite=True) as f:
                         f.set_data(vol_out[:, :, :, k].astype(np.float32))
                         f.voxel_size = project_configuration["apix"] * 2
-                print(f"CombinedOntologies cost: {time.time() - t_start:.1f} seconds {(time.time() - t_start) / len(ontology_names):.1f} per ontology.")
+                print(f"(GPU {gpu_id}) {j+1}/{len(tomogram_paths)} cost: {time.time() - t_start:.1f} seconds {(time.time() - t_start) / len(ontology_names):.1f} per feature.")
             except Exception as e:
                 print(e)
 
@@ -590,8 +601,8 @@ def render_volumes(renderer, tomo_path, requested_compositions, feature_library,
         tomo_tag = os.path.splitext(os.path.basename(tomo_path))[0]
 
         # Look for the feature in the macromolecule and output directories
-        m_path = glob.glob(os.path.join(project_configuration["root"], project_configuration["macromolecule_dir"], f"{tomo_tag}*{feature_name}.mrc"))
-        o_path = glob.glob(os.path.join(project_configuration["root"], project_configuration["output_dir"], f"{tomo_tag}*{feature_name}.mrc"))
+        m_path = glob.glob(os.path.join(project_configuration["root"], project_configuration["macromolecule_dir"], f"{tomo_tag}__{feature_name}.mrc"))
+        o_path = glob.glob(os.path.join(project_configuration["root"], project_configuration["output_dir"], f"{tomo_tag}__{feature_name}.mrc"))
         # Try to load the MRC file
         mrc_file = None
         if len(m_path) > 0 and os.path.exists(m_path[0]):
@@ -629,7 +640,6 @@ def render_volumes(renderer, tomo_path, requested_compositions, feature_library,
                 continue
             for feature in c:
                 if feature not in renderables:
-                    t_start = time.time()
                     try:
                         feature_volume, pixel_size = get_volume(tomo_path, feature)
                         if feature != "Lipid droplet" and (feature in project_configuration["ontologies"] or feature == "Unknown") and project_configuration["raytraced_ontologies"]:
@@ -681,6 +691,7 @@ def render_volumes(renderer, tomo_path, requested_compositions, feature_library,
                 continue
             composition_features.append(feature)
             if feature not in feature_library:
+                print(f"Feature {feature} not in feature library!")
                 feature_library[feature] = FeatureLibraryFeature()
                 feature_library[feature].title = feature
         tomo_req_compositions[name] = composition_features
@@ -798,8 +809,8 @@ def phase_3_projections(overwrite=False, parallel_processes=1):
 
         images_xy = dict()
         images_xz = dict()
-        xy_max = -1e9
-        xz_max = -1e9
+        xy_max = 1
+        xz_max = 1
         for o in ontologies:
             path = os.path.join(project_configuration["root"], project_configuration["output_dir"], f"{tomo}__{o}.mrc")
             if not os.path.exists(path):
@@ -822,6 +833,7 @@ def phase_3_projections(overwrite=False, parallel_processes=1):
             _max = np.amax(images_xz[o])
             if _max > xz_max:
                 xz_max = _max
+
         for o in ontologies:
             if not o in images_xy:
                 continue
@@ -879,25 +891,33 @@ def phase_3_browse():
     os.system(f"streamlit run {os.path.join(os.path.dirname(os.path.dirname(__file__)), 'app', 'Introduction.py')}")
 
 
-def phase_3_capp(target, context_window_size, bin_factor, parallel):
+def phase_3_capp(config_file_path, context_window_size, bin_factor, parallel):
     import multiprocessing
     import itertools
     from copy import copy
 
-    def _capp_job(tomo, target, context_window_size, bin_factor):
-        features = project_configuration["ontologies"] + ["Unknown"]
+    if not os.path.isabs(config_file_path) and not os.path.exists(config_file_path):
+        config_file_path = os.path.abspath(os.path.join(project_configuration["root"], "capp", f"{config_file_path}", "config.json"))
+
+    job_dir = os.path.dirname(config_file_path)
+    with open(config_file_path, 'r') as f:
+        job_config = json.load(f)
+        target = job_config["target"]
+        context_elements = job_config["context_elements"]
+
+    def _capp_job(tomo, job_dir, target, context_window_size, bin_factor, context_elements):
 
         coordinates = list()
-        coordinate_path = os.path.join(project_configuration["root"], "capp", f"{target}", f"{tomo}__{target}_coords.tsv")
+        coordinate_path = os.path.join(job_dir, "coordinates", f"{tomo}__{target}_coords.tsv")
         with open(coordinate_path, 'r') as f:
             for line in f:
                 c = line.split('\t')
                 coordinates.append((int(c[0]), int(c[1]), int(c[2])))
 
         out_lines = list()
-        out_header = "Z\tY\tX"
+        out_header = "X\tY\tZ"
         context_volumes = dict()
-        for f in features:
+        for f in context_elements:
             out_header += f"\t{f}"
             context_volumes[f] = mrcfile.mmap(os.path.join(project_configuration["root"], project_configuration["output_dir"], f"{tomo}__{f}.mrc")).data
         out_header += "\n"
@@ -916,38 +936,55 @@ def phase_3_capp(target, context_window_size, bin_factor, parallel):
             for f in context_volumes:
                 v_context = copy(context_volumes[f][j-w:j+w+1, k-w:k+w+1, l-w:l+w+1])
                 v_context = np.mean(v_context)
-                out_lines[-1] += f"\t{v_context:.5f}"
+                out_lines[-1] += f"\t{v_context:.3f}"
 
             out_lines[-1] += "\n"
 
-        with open(os.path.join(project_configuration["root"], "capp", f"{target}", "result", f"{tomo}__{target}_coords.tsv"), 'w') as f:
+        with open(os.path.join(job_dir, f"{tomo}__{target}_coords.tsv"), 'w') as f:
             f.write(out_header)
             f.writelines(out_lines)
 
-    def _capp_thread(tomos, thread_id, target, context_window_size, bin_factor):
+    def _capp_thread(tomos, thread_id, job_dir, target, context_window_size, bin_factor, context_elements):
         for j, p in enumerate(tomos):
-            _capp_job(p, target, context_window_size, bin_factor)
+            _capp_job(p, job_dir, target, context_window_size, bin_factor, context_elements)
             print(f"{j+1}/{len(tomos)} (thread {thread_id}) - {p}")
 
-    os.makedirs(os.path.join(project_configuration["root"], "capp", f"{target}", "result"), exist_ok=True)
-
-    tomos = [os.path.basename(f).split('__')[0] for f in glob.glob(os.path.join(project_configuration["root"], "capp", f"{target}", "*.tsv"))]
-    print(f"Found {len(tomos)} coordinate files in {os.path.join(project_configuration['root'], 'capp', f'{target}')}")
+    tomos = [os.path.basename(f).split('__')[0] for f in glob.glob(os.path.join(job_dir, "coordinates", "*.tsv"))]
+    print(f"Found {len(tomos)} coordinate files in {os.path.join(job_dir, 'coordinates')}")
 
     parallel_processes = int(parallel)
     if parallel_processes == 1:
-        _capp_thread(tomos, 0, target=target, context_window_size=context_window_size, bin_factor=bin_factor)
+        _capp_thread(tomos, 0, job_dir=job_dir, target=target, context_window_size=context_window_size, bin_factor=bin_factor, context_elements=context_elements)
     else:
         process_div = {p: list() for p in range(parallel)}
         for p, tomo in zip(itertools.cycle(range(parallel)), tomos):
             process_div[p].append(tomo)
         processes = list()
         for p in process_div:
-            processes.append(multiprocessing.Process(target=_capp_thread, args=(process_div[p], p, target, context_window_size, bin_factor)))
+            processes.append(multiprocessing.Process(target=_capp_thread, args=(process_div[p], p, job_dir, target, context_window_size, bin_factor, context_elements)))
             processes[-1].start()
         for p in processes:
             p.join()
 
+    capp_files = glob.glob(os.path.join(job_dir, "*.tsv"))
+    combined_lines = list()
+    for cf in capp_files:
+        if os.path.basename(cf) == 'all_particles.tsv':
+            continue
+        tomo_name = os.path.basename(cf).split("__")[0]
+        with open(cf, 'r') as f:
+            lines = f.readlines()
+            for l in lines[1:]:
+                combined_lines.append(f"{l.rstrip()}\t{tomo_name}\n")
+
+    with open(cf, 'r') as f:
+        header = f.readline().rstrip()
+        header += "\ttomo\n"
+
+    with open(os.path.join(job_dir, "all_particles.tsv"), 'w') as f:
+        f.write(header)
+        for l in combined_lines:
+            f.write(l)
 
 def phase_3_astm_run(config_file_path, overwrite, save_indices=False, save_masks=False, tomo=None):
     import Pommie
@@ -1021,41 +1058,45 @@ def phase_3_astm_run(config_file_path, overwrite, save_indices=False, save_masks
     skip_binding = False
 
     for j, t in enumerate(tomos):
-        out_path = os.path.join(job_dir, f"{t}__score.mrc")
-        t_start = time.time()
-        if os.path.exists(out_path) and not overwrite:
-            print(f"{j+1}/{len(tomos)} - skipping {t} as output exists.")
-        else:
+        try:
+            out_path = os.path.join(job_dir, f"{t}__score.mrc")
+            t_start = time.time()
+            if os.path.exists(out_path) and not overwrite:
+                print(f"{j+1}/{len(tomos)} - skipping {t} as output exists.")
+            else:
+                with mrcfile.new(out_path, overwrite=True) as f:
+                    f.set_data(np.zeros((10, 10, 10), dtype=np.float32) - 1)
+
+            volume_mask = generate_volume_mask(t, job_config)  # binning volume_mask is handled inside here
+            volume = Pommie.typedefs.Volume.from_path(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], f"{t}.mrc"))
+            volume.bin(job_config["template_binning"])
+
+            scores, indices = Pommie.compute.find_template_in_volume(volume=volume,
+                                                                     volume_mask=volume_mask,
+                                                                     template=template,
+                                                                     template_mask=template_mask,
+                                                                     transforms=transforms,
+                                                                     dimensionality=2,
+                                                                     stride=job_config["stride"],
+                                                                     skip_binding=skip_binding,
+                                                                     verbose=False)
+            skip_binding = True  # only need to bind once; first compute.find_template_in_volume call will do it.
+            print(f"{j + 1}/{len(tomos)} ({time.time() - t_start:.2f} seconds)- {t}")
             with mrcfile.new(out_path, overwrite=True) as f:
-                f.set_data(np.zeros((10, 10, 10), dtype=np.float32) - 1)
-
-        volume_mask = generate_volume_mask(t, job_config)  # binning volume_mask is handled inside here
-        volume = Pommie.typedefs.Volume.from_path(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], f"{t}.mrc"))
-        volume.bin(job_config["template_binning"])
-
-        scores, indices = Pommie.compute.find_template_in_volume(volume=volume,
-                                                                 volume_mask=volume_mask,
-                                                                 template=template,
-                                                                 template_mask=template_mask,
-                                                                 transforms=transforms,
-                                                                 dimensionality=2,
-                                                                 stride=job_config["stride"],
-                                                                 skip_binding=skip_binding,
-                                                                 verbose=False)
-        skip_binding = True  # only need to bind once; first compute.find_template_in_volume call will do it.
-        print(f"{j + 1}/{len(tomos)} ({time.time() - t_start:.2f} seconds)- {t}")
-        with mrcfile.new(out_path, overwrite=True) as f:
-            f.set_data(scores)
-            f.voxel_size = volume.apix
-        if save_indices:
-            with mrcfile.new(out_path.split("__")[0]+"__indices.mrc", overwrite=True) as f:
-                f.set_data(indices)
+                f.set_data(scores)
                 f.voxel_size = volume.apix
-        if save_masks:
-            with mrcfile.new(out_path.split("__")[0]+"__mask.mrc", overwrite=True) as f:
-                f.set_data(volume_mask.data.astype(np.float32))
-                f.voxel_size = volume_mask.apix
-
+            if save_indices:
+                with mrcfile.new(out_path.split("__")[0]+"__indices.mrc", overwrite=True) as f:
+                    f.set_data(indices)
+                    f.voxel_size = volume.apix
+            if save_masks:
+                with mrcfile.new(out_path.split("__")[0]+"__mask.mrc", overwrite=True) as f:
+                    f.set_data(volume_mask.data.astype(np.float32))
+                    f.voxel_size = volume_mask.apix
+        except Exception as e:
+            print(f"{j+1}/{len(tomos)} - skipping {t} due to error.")
+            print(e)
+            print()
 
 def phase_3_astm_pick(config_file_path, threshold, spacing, spacing_px=None, parallel=1, max_particles_per_tomogram=1e9, blur_kernel_px=0):
     from Ais.core.util import peak_local_max
@@ -1068,7 +1109,8 @@ def phase_3_astm_pick(config_file_path, threshold, spacing, spacing_px=None, par
 
     data_directory = os.path.dirname(config_file_path)
     output_directory = os.path.join(data_directory, "coordinates")
-
+    if os.path.exists(output_directory):
+        shutil.rmtree(output_directory)
     os.makedirs(output_directory, exist_ok=True)
     all_data_paths = list(filter(lambda f: os.path.getsize(f) > 10000, glob.glob(os.path.join(data_directory, "*__score.mrc"))))
 

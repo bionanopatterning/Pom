@@ -101,6 +101,7 @@ class FeatureLibraryFeature:
 
 project_configuration = load_config()
 feature_library = parse_feature_library(os.path.join(os.path.expanduser("~"), ".Ais", "feature_library.txt"))
+
 for f in project_configuration["ontologies"] + project_configuration["macromolecules"] + ["Unknown"]:
     if f not in feature_library:
         feature_library[f] = FeatureLibraryFeature()

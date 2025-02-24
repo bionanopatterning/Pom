@@ -33,6 +33,6 @@
   "camera_pitch": -30.0,
   "camera_yaw": 180.0,
   "z_margin_summary": 0.3,
-  "silhouette_alpha":  0.5,
+  "silhouette_alpha": 0.5,
   "silhouette_threshold": 0.01
 }

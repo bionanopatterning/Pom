@@ -133,7 +133,7 @@ with column_base:
     with c2:
         st.image(get_image(tomo_name, "Macromolecules"), use_container_width=True, caption="Macromolecules")
     with c3:
-        st.image(get_image(tomo_name, "Top3"), use_container_width=True, caption="Top 3 ontologies")
+        st.image(get_image(tomo_name, "Top3"), use_container_width=True, caption="Top 3 organelles")
 
     ranked_distance_series = rank_distance_series(tomo_name, rank_df)
     c1, c2 = st.columns([5, 5])

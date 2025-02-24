@@ -19,7 +19,7 @@ with open("project_configuration.json", 'r') as f:
     project_configuration = json.load(f)
 
 
-feature_library = parse_feature_library("feature_library.txt")
+feature_library = parse_feature_library(os.path.join(os.path.expanduser("~"), ".Ais", "feature_library.txt"))
 df = pd.read_excel(os.path.join(project_configuration["root"], "summary.xlsx"), index_col=0)
 df = df.dropna(axis=0)
 
@@ -38,14 +38,13 @@ def get_image(tomo, image):
         return Image.fromarray(np.zeros((128, 128)), mode='L')
 
 def recolor(color, style=0):
+    c = color
     if style == 0:
-        return (np.array(color) / 2.0 + 0.5)
+        c =  np.array(color) / 2.0 + 0.5
     if style == 1:
-        return (np.array(color) / 8 + 0.875)
-    else:
-        return color
-
-
+        c = np.array(color) / 8 + 0.875
+    c = np.clip(c, 0, 1)
+    return c
 
 copy_df = copy.deepcopy(df)
 copy_df = copy_df.reset_index()

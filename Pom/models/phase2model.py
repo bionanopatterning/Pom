@@ -4,32 +4,6 @@ from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, Conv2DTranspose
 from tensorflow.keras.optimizers import Adam
 
 
-# class attention_row_columns(tf.keras.layers.Layer):
-#     def __init__(self, dmodel, nheads, k_dim, dff_dim):
-#         super().__init__()
-#         assert k_dim % nheads == 0
-#         self.MHA_row_layer = tf.keras.layers.MultiHeadAttention(nheads, k_dim)
-#         self.MHA_col_layer = tf.keras.layers.MultiHeadAttention(nheads, k_dim)
-#
-#         self.permute = tf.keras.layers.Permute((2, 1, 3))
-#
-#         self.layer_norm1 = tf.keras.layers.LayerNormalization()
-#         self.layer_norm2 = tf.keras.layers.LayerNormalization()
-#
-#         self.linear1 = tf.keras.layers.Dense(dff_dim)
-#         self.linear2 = tf.keras.layers.Dense(dmodel)
-#
-#
-#     def call(self, x):
-#         x = self.layer_norm1(x)
-#         x1 = self.MHA_row_layer(x, x, x)
-#         x1 = self.permute(x1)
-#         x1 = self.MHA_col_layer(x1, x1, x1)
-#         x = self.layer_norm2(x1 + x)
-#         x = self.linear2(tf.keras.activations.relu(self.linear1(x)))
-#         return x
-
-
 def create_model(input_shape, output_dimensionality):
     inputs = Input(input_shape)
 

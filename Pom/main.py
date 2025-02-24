@@ -16,7 +16,8 @@ def main():
     p1sp.add_parser('initialize', help='Initialize the training data for selected annotations.')
 
     p1sp_train = p1sp.add_parser('train', help='Train a single-feature output model for a selected feature.')
-    p1sp_train.add_argument('-o', '--ontology', required=True, help='The feature for which to train a network.')
+    p1sp_train.add_argument('-o', '--ontology', required=False, default="", help='The feature for which to train a network.')
+    p1sp_train.add_argument('-all', '--all-features', required=False, default=0, type=int, help="Use '-all 1' to train for all features (overrides -o argument)")
     p1sp_train.add_argument('-gpus', required=False, help='Which GPUs to use, e.g. "0,1,2,3" for GPU 0-3. If used, overrides the GPU usage set in the project configuration.')
     p1sp_train.add_argument('-c', '--counterexamples', required=False, default=0, help='(1 or 0 (default)). Whether or not to use negative image examples taken from datasets for other features. Images that are annotated as fully A can be used to instruct a model for feature B that that image is fully not B.')
 
@@ -63,7 +64,7 @@ def main():
     p5p.add_argument('-p', '--processes', required=False, default=1, help='Number of parallel processing jobs. Default is 1, a higher value is likely faster.')
 
     capp = subparsers.add_parser('capp', help='Context-aware particle picking.')
-    capp.add_argument('-t', '--target', required=True, help='Particle type to perform CAPP for. Particle coordinate files are expected at root/capp/<target>;')
+    capp.add_argument('-c', '--config', required=True, help='Job name, or path to a config.json job definition file.')
     capp.add_argument('-w', '--window-size', required=False, default=16, type=int, help='Size (in pixels, at the same scale as the coordinates) of the context window.')
     capp.add_argument('-b', '--bin-factor', required=False, default=2, type=int, help='Difference in the sizes of i) particle picking volumes, and ii) organelle segmentation volumes. If (i) is a Pom macromolecule segmentation, the value for -b should be 2 (default).')
     capp.add_argument('-p', '--parallel', required=False, default=1, type=int, help='Number of parallel processes to run.')
@@ -96,7 +97,7 @@ def main():
             cli_fn.phase_1_initialize()
         elif args.phase1_command == "train":
             gpus = cfg.project_configuration["GPUS"] if not args.gpus else args.gpus
-            cli_fn.phase_1_train(gpus, args.ontology, use_counterexamples=int(args.counterexamples))
+            cli_fn.phase_1_train(gpus, args.ontology, use_counterexamples=int(args.counterexamples), all_features=args.all_features)
         elif args.phase1_command == "test":
             gpus = cfg.project_configuration["GPUS"] if not args.gpus else args.gpus
             cli_fn.phase_1_test(gpus, args.ontology, process=False)
@@ -121,7 +122,7 @@ def main():
     elif args.command == 'browse':
         cli_fn.phase_3_browse()
     elif args.command == 'capp':
-        cli_fn.phase_3_capp(target=args.target, context_window_size=args.window_size, bin_factor=args.bin_factor, parallel=args.parallel)
+        cli_fn.phase_3_capp(args.config, context_window_size=args.window_size, bin_factor=args.bin_factor, parallel=args.parallel)
     elif args.command == 'astm':
         if args.astm_command == 'run':
             cli_fn.phase_3_astm_run(args.config, args.overwrite, args.save_indices, args.save_masks, args.tomo_name)
