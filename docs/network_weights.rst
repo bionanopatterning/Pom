@@ -58,7 +58,7 @@ First, set the following parameters in the project_configuration.json file:
     ],
     "z_sum": 2,
 
-Then copy the weights file (.h5) to root/models/phase2/ and run 'pom shared process':
+Then copy the weights file (.h5) to root/models/phase2/ and run 'pom shared process' as below. If you do not want to save the output volumes for some of the output features, replace their name by a single underscore ('_'). Do not change the number of values in the list or their order though - that would lead to output volumes being given the wrong name.
 
 ::
 
