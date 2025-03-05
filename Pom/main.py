@@ -74,10 +74,9 @@ def main():
     p1sp.add_parser('initialize', help='Initialize the training data for selected annotations.')
     astm = subparsers.add_parser('astm', help="Area-selective template matching.")
     astm_parser = astm.add_subparsers(dest='astm_command', help="ASTM commands")
-
     astm_run = astm_parser.add_parser('run', help="Run ASTM jobs.")
     astm_run.add_argument('-c', '--config', required=True, help="Job name, or path to a config.json job definition file.")
-    astm_run.add_argument('-o', '--overwrite', required=False, default=1, help="Overwrite (1) or skip (0) tomos for which previous output exists.")
+    astm_run.add_argument('-o', '--overwrite', required=False, default=0, help="Overwrite (1) or skip (0, default) tomos for which previous output exists.")
     astm_run.add_argument('-indices', '--save-indices', required=False, default=1, help="Whether to save the matching template indices to a separate output .mrc.")
     astm_run.add_argument('-masks', '--save-masks', required=False, default=1, help="Whether to save the volume mask to a separate output .mrc.")
     astm_run.add_argument('-t', '--tomo-name', required=False, default=None, help="Select a specific tomogram to process")
@@ -125,7 +124,7 @@ def main():
         cli_fn.phase_3_capp(args.config, context_window_size=args.window_size, bin_factor=args.bin_factor, parallel=args.parallel)
     elif args.command == 'astm':
         if args.astm_command == 'run':
-            cli_fn.phase_3_astm_run(args.config, args.overwrite, args.save_indices, args.save_masks, args.tomo_name)
+            cli_fn.phase_3_astm_run(args.config, True if args.overwrite == 1 else False, args.save_indices, args.save_masks, args.tomo_name)
         if args.astm_command == 'pick':
             cli_fn.phase_3_astm_pick(args.config, args.threshold, args.minimum_spacing, args.minimum_spacing_px, args.parallel, args.max, args.blur_px)
 

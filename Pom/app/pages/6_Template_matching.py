@@ -392,8 +392,6 @@ def new_job():
 
 
 def view_particles(job_name):
-
-
     N_ROWS = 6
     N_COLS = 5
     IMG_SIZE = 128
@@ -504,16 +502,17 @@ def view_job(job_name):
         st.text(f"Find particle coordinates using the template matching scores:")
         c1, c2 = st.columns(2, vertical_alignment="bottom")
         with c2:
-            c = st.columns([1, 1, 2, 1])
+            c = st.columns([1, 1, 2, 2])
             threshold = c[0].number_input("Threshold", min_value=0.0, max_value=1.0, step=0.01, value=0.5, format="%0.2f")
             spacing = c[1].number_input("Spacing (px)", min_value=1, step=1, value=10)
-            n_max = c[2].number_input("Max particles per tomogram", min_value=1, step=1, value=10)
-            blur_px = c[3].number_input("Z-Blur scores (px)", min_value=0, step=1, value=0)
+            n_max = c[2].number_input("Max per tomogram", min_value=1, step=1, value=10)
+            blur_px = c[3].number_input("Postprocessing blur (px)", min_value=0, step=1, value=0)
         with c1:
                 n_proc_use = multiprocessing.cpu_count() // 2
                 st.code(f"pom astm pick -c {job_name} -threshold {threshold:.2f} -spacing-px {spacing} -max {n_max} -blur {blur_px} -p {n_proc_use}")
 
     with st.expander("**Score volumes**", expanded=True):
+        # TODO: instead of the current interface, show a table with min max values, number of 1's in mask, and open in ais button.
         completed_tomos = [os.path.basename(os.path.splitext(p)[0]).split("__")[0] for p in list(filter(lambda f: os.path.getsize(f) > 10000, glob.glob(os.path.join(project_configuration["root"], "astm", f"{job_name}", "*__score.mrc"))))]
         n_completed = len(completed_tomos)
         n_total = len(glob.glob(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], f"*.mrc")))

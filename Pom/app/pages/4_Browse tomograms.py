@@ -125,38 +125,38 @@ with column_base:
         if st.columns([6, 2, 6])[1].button("Open in Ais", type="primary", use_container_width=True):
             open_in_ais(tomo_name)
 
+    if len(df) > 5:
+        c1, c2, c3 = st.columns([5, 5, 5])
+        with c1:
+            st.image(get_image(tomo_name, "density").transpose(Image.FLIP_TOP_BOTTOM), use_container_width=True,
+                     caption="Density (central slice)")
+        with c2:
+            st.image(get_image(tomo_name, "Macromolecules"), use_container_width=True, caption="Macromolecules")
+        with c3:
+            st.image(get_image(tomo_name, "Top3"), use_container_width=True, caption="Top 3 organelles")
 
-    c1, c2, c3 = st.columns([5, 5, 5])
-    with c1:
-        st.image(get_image(tomo_name, "density").transpose(Image.FLIP_TOP_BOTTOM), use_container_width=True,
-                 caption="Density (central slice)")
-    with c2:
-        st.image(get_image(tomo_name, "Macromolecules"), use_container_width=True, caption="Macromolecules")
-    with c3:
-        st.image(get_image(tomo_name, "Top3"), use_container_width=True, caption="Top 3 organelles")
-
-    ranked_distance_series = rank_distance_series(tomo_name, rank_df)
-    c1, c2 = st.columns([5, 5])
-    with c1:
-        st.markdown(
-            f'<div style="text-align: center;margin-bottom: -15px; font-size: 14px;"><b>Most similar tomograms</b></div>',
-            unsafe_allow_html=True)
-        for j in range(3):
-            t_name = ranked_distance_series.index[1 + j]
-            t_link = f"/Browse_tomograms?tomo_id={t_name}"
+        ranked_distance_series = rank_distance_series(tomo_name, rank_df)
+        c1, c2 = st.columns([5, 5])
+        with c1:
             st.markdown(
-                f"<p style='text-align: center; margin-bottom: -20px;font-size: 12px;'><a href='{t_link}'>{t_name}</a></p>",
+                f'<div style="text-align: center;margin-bottom: -15px; font-size: 14px;"><b>Most similar tomograms</b></div>',
                 unsafe_allow_html=True)
-    with c2:
-        st.markdown(
-            f'<div style="text-align: center;margin-top: 5px; margin-bottom: -15px; font-size: 14px;"><b>Most dissimilar tomograms:</b></div>',
-            unsafe_allow_html=True)
-        for j in range(3):
-            t_name = ranked_distance_series.index[-(j + 1)]
-            t_link = f"/Browse_tomograms?tomo_id={t_name}"
+            for j in range(3):
+                t_name = ranked_distance_series.index[1 + j]
+                t_link = f"/Browse_tomograms?tomo_id={t_name}"
+                st.markdown(
+                    f"<p style='text-align: center; margin-bottom: -20px;font-size: 12px;'><a href='{t_link}'>{t_name}</a></p>",
+                    unsafe_allow_html=True)
+        with c2:
             st.markdown(
-                f"<p style='text-align: center; margin-bottom: -20px;font-size: 12px;'><a href='{t_link}'>{t_name}</a></p>",
+                f'<div style="text-align: center;margin-top: 5px; margin-bottom: -15px; font-size: 14px;"><b>Most dissimilar tomograms:</b></div>',
                 unsafe_allow_html=True)
+            for j in range(3):
+                t_name = ranked_distance_series.index[-(j + 1)]
+                t_link = f"/Browse_tomograms?tomo_id={t_name}"
+                st.markdown(
+                    f"<p style='text-align: center; margin-bottom: -20px;font-size: 12px;'><a href='{t_link}'>{t_name}</a></p>",
+                    unsafe_allow_html=True)
 
     st.text("")
     ontologies = df.loc[tomo_name].sort_values(ascending=False).index.tolist()

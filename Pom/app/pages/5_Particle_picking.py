@@ -97,7 +97,7 @@ def crop_from_tomo(particle_data, s, feature_library):
     for c in context_elements:
         c_val = particle_data[c]
         context_img[:, int(j * s):(int((j + c_val) * s)), :] = feature_library[c].colour
-
+        j += c_val
     combined_img = np.zeros((s + CONTEXT_BAR_HEIGHT, s, 3))
     combined_img[:s, :, 0] = image[::-1]
     combined_img[:s, :, 1] = image[::-1]

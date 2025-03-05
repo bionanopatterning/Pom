@@ -534,7 +534,7 @@ def phase_2_process(gpus="0"):
 
 
 def phase_3_summarize(overwrite=False, skip_macromolecules=False, target_feature=None):
-    ## TODO: add argument to measure a specific feature only.
+    ## TODO: get mean vals from header instead of loading the whole vol
     import pandas as pd
 
     data_directories = [project_configuration["output_dir"]]
@@ -951,7 +951,9 @@ def phase_3_capp(config_file_path, context_window_size, bin_factor, parallel):
 
     tomos = [os.path.basename(f).split('__')[0] for f in glob.glob(os.path.join(job_dir, "coordinates", "*.tsv"))]
     print(f"Found {len(tomos)} coordinate files in {os.path.join(job_dir, 'coordinates')}")
-
+    if len(tomos) == 0:
+        return
+    
     parallel_processes = int(parallel)
     if parallel_processes == 1:
         _capp_thread(tomos, 0, job_dir=job_dir, target=target, context_window_size=context_window_size, bin_factor=bin_factor, context_elements=context_elements)
@@ -1024,8 +1026,6 @@ def phase_3_astm_run(config_file_path, overwrite, save_indices=False, save_masks
 
         return out_mask
 
-
-
     job_dir = os.path.dirname(config_file_path)
     with open(config_file_path, 'r') as f:
         job_config = json.load(f)
@@ -1054,7 +1054,6 @@ def phase_3_astm_run(config_file_path, overwrite, save_indices=False, save_masks
         tomos = [os.path.splitext(tomo)[0]]
     else:
         tomos = [os.path.basename(os.path.splitext(f)[0]) for f in glob.glob(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], f"*.mrc"))]
-        np.random.shuffle(tomos)
     skip_binding = False
 
     for j, t in enumerate(tomos):
@@ -1063,6 +1062,7 @@ def phase_3_astm_run(config_file_path, overwrite, save_indices=False, save_masks
             t_start = time.time()
             if os.path.exists(out_path) and not overwrite:
                 print(f"{j+1}/{len(tomos)} - skipping {t} as output exists.")
+                continue
             else:
                 with mrcfile.new(out_path, overwrite=True) as f:
                     f.set_data(np.zeros((10, 10, 10), dtype=np.float32) - 1)
@@ -1102,7 +1102,7 @@ def phase_3_astm_pick(config_file_path, threshold, spacing, spacing_px=None, par
     from Ais.core.util import peak_local_max
     import itertools
     import multiprocessing
-    from scipy.ndimage import gaussian_filter1d
+    from scipy.ndimage import gaussian_filter
 
     if not os.path.isabs(config_file_path) and not os.path.exists(config_file_path):
         config_file_path = os.path.abspath(os.path.join(project_configuration["root"], "astm", f"{config_file_path}", "config.json"))
@@ -1123,7 +1123,7 @@ def phase_3_astm_pick(config_file_path, threshold, spacing, spacing_px=None, par
                 pxs = f.voxel_size
 
             if blur_kernel_px > 0:
-                vol = gaussian_filter1d(vol, sigma=blur_kernel_px, axis=0)
+                vol = gaussian_filter(vol, sigma=blur_kernel_px)
 
             min_distance = int((spacing / pxs)) if spacing_px is None else spacing_px
             coordinates = peak_local_max(vol, min_distance=min_distance, threshold_abs=threshold)
@@ -1131,7 +1131,8 @@ def phase_3_astm_pick(config_file_path, threshold, spacing, spacing_px=None, par
             with open(out_path, 'w') as f:
                 for c in coordinates:
                     n_picked += 1
-                    f.write(f"{c[0]}\t{c[1]}\t{c[2]}\n")
+                    coord_score = vol[c[0], c[1], c[2]]
+                    f.write(f"{c[0]}\t{c[1]}\t{c[2]}\t{coord_score}\n")
                     if n_picked >= max_per_tomogram:
                         break
             print(f"{j+1}/{len(data_paths)} (thread {thread_id}) - {n_picked} particles in {out_path}")
@@ -1169,9 +1170,9 @@ def phase_3_astm_pick(config_file_path, threshold, spacing, spacing_px=None, par
         def __str__(self):
             return f"{self.x}\t{self.y}\t{self.z}\t{self.score}\t{self.tomo}\t{self.t_idx}\n"
 
-    for cf in coordinate_files:
+    for j, cf in enumerate(coordinate_files):
+        print(f"{j+1}/{len(coordinate_files)} parsing - {cf}")
         tomo_name = os.path.splitext(os.path.basename(cf))[0].split("__")[0]
-        mmap = mrcfile.mmap(os.path.join(data_directory, f"{tomo_name}__score.mrc"))
         idx_mmap = mrcfile.mmap(os.path.join(data_directory, f"{tomo_name}__indices.mrc"))
         with open(cf, 'r') as f:
             lines = f.readlines()
@@ -1181,7 +1182,7 @@ def phase_3_astm_pick(config_file_path, threshold, spacing, spacing_px=None, par
             p.z = int(vals[0])
             p.y = int(vals[1])
             p.x = int(vals[2])
-            p.score = mmap.data[p.z, p.y, p.x]
+            p.score = float(vals[3])
             p.t_idx = idx_mmap.data[p.z, p.y, p.x]
             p.tomo = tomo_name
             particles.append(p)
