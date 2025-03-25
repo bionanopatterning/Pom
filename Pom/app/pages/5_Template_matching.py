@@ -303,7 +303,7 @@ def new_job():
     job_config["stride"] = c1.number_input("Stride", value=1, min_value=1)
 
     c2.subheader("Transform")
-    job_config["transform_n"] = c2.number_input("Number of transforms", value=500, min_value=1, max_value=500)
+    job_config["transform_n"] = c2.number_input("Number of transforms", value=500, min_value=1, max_value=1000)
     job_config["transform_polar_min"] = c2.number_input("Polar angle start", value=-90, min_value=-90, max_value=90)
     job_config["transform_polar_max"] = c2.number_input("Polar angle stop", value=90, min_value=-90, max_value=90)
 
@@ -478,8 +478,8 @@ def view_particles(job_name):
                     z = unbin * int(all_particles.iloc[idx, 2])
                     score = float(all_particles.iloc[idx, 3])
                     tomo = all_particles.iloc[idx, 4]
-                    t_idx = int(all_particles.iloc[idx, 5])
-                    display_particle(x, y, z, score, tomo, t_idx, uid=idx)
+                    #t_idx = int(all_particles.iloc[idx, 5])
+                    display_particle(x, y, z, score, tomo, t_idx=0, uid=idx)
 
     # c1, c2, c3 = st.columns(3, vertical_alignment="center")
     # with c2:
@@ -509,7 +509,7 @@ def view_job(job_name):
             c = st.columns(4)
             threshold = c[0].number_input("Threshold", min_value=0.0, max_value=1.0, step=0.01, value=0.5, format="%0.2f")
             spacing = c[1].number_input("Spacing (px)", min_value=1, step=1, value=10)
-            n_max = c[2].number_input("Max particles per tomogram", min_value=1, step=1, value=10)
+            n_max = c[2].number_input("Max per tomogram", min_value=1, step=1, value=10)
             blur_px = c[3].number_input("Z-Blur scores (px)", min_value=0, step=1, value=0)
         with c1:
                 st.code(f"pom astm pick -c {job_name} -threshold {threshold:.2f} -spacing-px {spacing} -max {n_max} -blur {blur_px}")
