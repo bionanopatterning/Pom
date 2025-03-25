@@ -15,6 +15,7 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.colorbar as colorbar
+import multiprocessing
 
 st.set_page_config(
     page_title="Template matching",
@@ -299,7 +300,7 @@ def new_job():
     c1, c2, c3 = st.columns([4, 4, 4])
 
     c1.subheader("Base settings")
-    job_config["job_name"] = c1.text_input("Job name", value="...")
+    job_config["job_name"] = c1.text_input("Job name", value="New ASTM job")
     job_config["stride"] = c1.number_input("Stride", value=1, min_value=1)
 
     c2.subheader("Transform")
@@ -394,9 +395,7 @@ def new_job():
 
 
 def view_particles(job_name):
-
-
-    N_ROWS = 20
+    N_ROWS = 6
     N_COLS = 5
     IMG_SIZE = 128
 
@@ -478,8 +477,8 @@ def view_particles(job_name):
                     z = unbin * int(all_particles.iloc[idx, 2])
                     score = float(all_particles.iloc[idx, 3])
                     tomo = all_particles.iloc[idx, 4]
-                    #t_idx = int(all_particles.iloc[idx, 5])
-                    display_particle(x, y, z, score, tomo, t_idx=0, uid=idx)
+                    t_idx = int(all_particles.iloc[idx, 5])
+                    display_particle(x, y, z, score, tomo, t_idx, uid=idx)
 
     # c1, c2, c3 = st.columns(3, vertical_alignment="center")
     # with c2:
@@ -506,15 +505,17 @@ def view_job(job_name):
         st.text(f"Find particle coordinates using the template matching scores:")
         c1, c2 = st.columns(2, vertical_alignment="bottom")
         with c2:
-            c = st.columns(4)
+            c = st.columns([1, 1, 2, 2])
             threshold = c[0].number_input("Threshold", min_value=0.0, max_value=1.0, step=0.01, value=0.5, format="%0.2f")
             spacing = c[1].number_input("Spacing (px)", min_value=1, step=1, value=10)
             n_max = c[2].number_input("Max per tomogram", min_value=1, step=1, value=10)
-            blur_px = c[3].number_input("Z-Blur scores (px)", min_value=0, step=1, value=0)
+            blur_px = c[3].number_input("Postprocessing blur (px)", min_value=0, step=1, value=0)
         with c1:
-                st.code(f"pom astm pick -c {job_name} -threshold {threshold:.2f} -spacing-px {spacing} -max {n_max} -blur {blur_px}")
+                n_proc_use = multiprocessing.cpu_count() // 2
+                st.code(f"pom astm pick -c {job_name} -threshold {threshold:.2f} -spacing-px {spacing} -max {n_max} -blur {blur_px} -p {n_proc_use}")
 
     with st.expander("**Score volumes**", expanded=True):
+        # TODO: instead of the current interface, show a table with min max values, number of 1's in mask, and open in ais button.
         completed_tomos = [os.path.basename(os.path.splitext(p)[0]).split("__")[0] for p in list(filter(lambda f: os.path.getsize(f) > 10000, glob.glob(os.path.join(project_configuration["root"], "astm", f"{job_name}", "*__score.mrc"))))]
         n_completed = len(completed_tomos)
         n_total = len(glob.glob(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], f"*.mrc")))
@@ -557,7 +558,17 @@ def view_job(job_name):
 available_jobs = [os.path.basename(os.path.dirname(f)) for f in glob.glob(os.path.join(project_configuration["root"], "astm", "*", "config.json"))]
 available_jobs = ["Create new job"] + available_jobs
 
+
+if "selected_job" not in st.session_state:
+    st.session_state.selected_job = "Create new job"
+
 selected_job = available_jobs[0]
+
+def redirect():
+    redirect_target = st.session_state.selected_job
+    time.sleep(0.5)
+    st.query_params["job_name"] = redirect_target
+
 if "job_name" in st.query_params:
     selected_job = st.query_params["job_name"]
 
@@ -565,11 +576,11 @@ selected_job_idx = 0
 if selected_job in available_jobs:
     selected_job_idx = available_jobs.index(selected_job)
 
-c1, c2, c3 = st.columns([4, 3, 1])
+c1, c2, c3 = st.columns([5, 1, 2])
 with c1:
     st.header("Area-selective template matching")
 with c3:
-    selected_job = st.selectbox("Select job", options=available_jobs, index=selected_job_idx)
+    selected_job = st.selectbox("Select job", options=available_jobs, key="selected_job", on_change=redirect())
 st.divider()
 
 if selected_job == "Create new job":

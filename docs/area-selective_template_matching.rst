@@ -34,7 +34,7 @@ And go to the 'Template matching' tab to set up a new job. Here you can define a
    :align: center
    :width: 100%
 
-Next, set up the area-selection criteria. In the example below, we've defined masks that included the Cytoplasm (thresholded at 0.5) and additionally those regions where the Void segmentation is > 0.1.
+Next, set up the area-selection criteria. In the example below, we've defined masks that included the Cytoplasm (thresholded at 0.5) and additionally that avoid areas with a Void segmentation value > 0.1.
 
 .. image:: ./res/astm_2.png
    :alt: ASTM New Job setup 2

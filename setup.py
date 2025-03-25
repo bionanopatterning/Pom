@@ -19,12 +19,13 @@ setup(
     package_data={'': ['*.png', '*.glsl', '*.pdf', '*.txt', '*.json']},
     include_package_data=False,  # weirdly, the above filetypes _are_ included when this parameter is set to False.
     install_requires=[
-        "Ais-cryoET>=1.0.40",
+        "Ais-cryoET>=1.0.41",
         "matplotlib",
         "openpyxl",
         "pandas",
         "streamlit",
-        "streamlit-aggrid"
+        "streamlit-aggrid",
+        "Pommie"
     ]
 )
 

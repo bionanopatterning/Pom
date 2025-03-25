@@ -1,15 +1,12 @@
 from Pom.core.opengl_classes import *
 import Pom.core.config as cfg
-from Pom.core.config import project_configuration, feature_library
+from Pom.core.config import project_configuration
 import json
 import glfw
 from skimage import measure
 from scipy.ndimage import label, binary_dilation, gaussian_filter1d, gaussian_filter
 
-# TODO: add ray-traced volume rendering
-# TODO: changed the zmin to 1e3, see if that doesn't clip certain objects!
 PIXEL_SCALE = 950 * 1.1
-
 
 class Renderer:
     def __init__(self, image_size=512):
@@ -331,6 +328,8 @@ class SurfaceModel:
         self.alpha = feature_definition.render_alpha
 
         self.render_pixel_size = PIXEL_SCALE / self.data.shape[1]
+        if pixel_size == 1.0:  # Likely AreTomo tomo with no apix set; in Ais this is set to 10.0 A instead, do the same here.
+            pixel_size = 10.0
         self.true_pixel_size = pixel_size / 10.0
         if self.true_pixel_size < 0.1:
             self.dust = 0.0

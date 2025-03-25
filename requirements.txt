@@ -6,3 +6,5 @@ openpyxl
 pandas
 streamlit
 streamlit-aggrid
+matplotlib
+Pommie
