@@ -13,12 +13,15 @@ from Pom.core.config import parse_feature_library, FeatureLibraryFeature
 from scipy.ndimage import gaussian_filter
 CONTEXT_BAR_HEIGHT = 5
 
+
 st.set_page_config(
     page_title="Particle picking",
     layout='wide'
 )
 
 ""
+
+
 st.markdown("""
 <style>
 div[data-testid="stButtonGroup"] button {
@@ -36,6 +39,12 @@ div[data-testid="stButtonGroup"] button {
 with open("project_configuration.json", 'r') as f:
     project_configuration = json.load(f)
 
+
+tomo_subsets = [
+    os.path.splitext(os.path.basename(j))[0]
+    for j in glob.glob(os.path.join(project_configuration["root"], "subsets", "*.json"))
+] + ['all']
+
 def save_job(job_config):
     # save required files
     job_path = os.path.join(project_configuration["root"], "capp", job_config["job_name"], "config.json")
@@ -51,16 +60,14 @@ def new_job():
     job_config = dict()
     c1, c2 = st.columns([2, 3])
 
-    c1.subheader("Base settings")
     job_config["job_name"] = c1.text_input("Job name", value="New CAPP job")
     available_targets = set([os.path.splitext(os.path.basename(f))[0].split("__")[1] for f in glob.glob(os.path.join(project_configuration["root"], project_configuration["macromolecule_dir"], f"*__*.mrc"))])
 
     job_config["target"] = c1.selectbox("Target", options=available_targets)
 
     with c2:
-        st.subheader("Context settings")
         job_config["context_elements"] = st.multiselect("Features to include", project_configuration["ontologies"] + ["Unknown"], project_configuration["ontologies"] + ["Unknown"])
-
+        job_config["subsets"] = st.multiselect("Tomogram subsets to include", options=tomo_subsets, default='all')
     st.divider()
 
     if st.columns([3, 1, 3])[1].button("Save job", use_container_width=True, type="primary"):
@@ -202,8 +209,15 @@ def view_particles(job_name):
             open_in_ais(tomo, slice=particle_data['Z'])
 
         st.markdown(
-            f"<p style='text-align: center; font-size: 12px; margin: 0px;'>{tomo}</p>",
-            unsafe_allow_html=True
+            f"""
+            <div style='text-align:center; margin:0;'>
+                <a href='/Browse_tomograms?tomo_id={tomo}'
+                   style='font-size:12px; text-decoration:none;'>
+                   {tomo}
+                </a>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
 
@@ -219,7 +233,55 @@ def view_particles(job_name):
                     particle_data = all_particles.iloc[idx]
                     display_particle(particle_data, uid=idx)
 
+def _do_export_subset(job_name, sliders, out_dir):
+    os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(os.path.join(out_dir, 'coords'), exist_ok=True)
+    data_path = os.path.join(project_configuration["root"], "capp", job_name, "all_particles.tsv")
 
+    df = pd.read_table(data_path, header=0)
+
+    print(f"\nApplying filters to {len(df)} particles.")
+    for f in sliders:
+        df = df[df[f].between(sliders[f][0], sliders[f][1])]
+        print(f"Applying filter: {sliders[f][0]:.2f} < {f} < {sliders[f][1]:.2f} {' '* max(0, 30 - len(f))}{len(df)} particles remaining.")
+
+    # output two file types:
+    # all_particles.star: rlnTomoName rlnTomoImportParticleFile
+    # per tomogram: {t}.coords
+
+    tomo_map = []
+    for tomo, sub in df.groupby("tomo"):
+        #tomo = tomo.replace('_bin2', '')
+        tomo_coords_path = os.path.join(os.getcwd(), out_dir, 'coords', f"{tomo}.coords")
+        tomo_map.append((tomo, tomo_coords_path))
+        sub[["X", "Y", "Z"]].to_csv(tomo_coords_path, sep=" ", index=False, header=False)
+
+    with open(os.path.join(out_dir, 'all_particles.star'), 'w') as f:
+        f.write('\ndata_\n\nloop_\n_rlnTomoName #1\n_rlnTomoImportParticleFile #2\n')
+        for tomo, tomo_coords_path in tomo_map:
+            f.write(f"{tomo}  {tomo_coords_path}\n")
+
+    print(f"Saved {os.path.join(out_dir, 'all_particles.star')}")
+
+def export_subsets(job_name):
+    with open(os.path.join(project_configuration["root"], "capp", job_name, f"config.json"), 'r') as f:
+        job_config = json.load(f)
+
+    st.markdown(f"**Set context value ranges**")
+    n_sliders_per_row = 4
+    cols = st.columns(n_sliders_per_row)
+    sliders = dict()
+    for j, f in enumerate(job_config["context_elements"]):
+        with cols[j % n_sliders_per_row]:
+            sliders[f] = st.slider(f"{f}", 0.0, 1.0, (0.0, 1.0))
+
+    cols = st.columns([3, 4, 1, 3])
+    collection_name = cols[1].text_input("collection name", value="new_particle_set", label_visibility="collapsed")
+    out_dir = os.path.join(project_configuration["root"], "capp", job_name, collection_name)
+    if cols[2].button('save'):
+        _do_export_subset(job_name, sliders, out_dir)
+
+    st.columns([3, 5, 3])[1].markdown(f'Output directory: {out_dir}/')
 
 
 def view_job(job_name):
@@ -246,6 +308,10 @@ def view_job(job_name):
 
     with st.expander(f"Detected particles", expanded=True):
         view_particles(job_name)
+
+    with st.expander(f"Export subsets", expanded=False):
+        export_subsets(job_name)
+
 
 available_jobs = [os.path.basename(os.path.dirname(f)) for f in glob.glob(os.path.join(project_configuration["root"], "capp", "*", "config.json"))]
 available_jobs = ["Create new job"] + available_jobs

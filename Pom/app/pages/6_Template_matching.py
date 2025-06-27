@@ -64,6 +64,12 @@ with open("project_configuration.json", 'r') as f:
     project_configuration = json.load(f)
 
 
+tomo_subsets = [
+    os.path.splitext(os.path.basename(j))[0]
+    for j in glob.glob(os.path.join(project_configuration["root"], "subsets", "*.json"))
+] + ['all']
+
+
 def crop_from_tomo(tomo, x, y, z, s):
     tomo_path = os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], f"{tomo}.mrc")
 
@@ -298,6 +304,7 @@ def new_job():
 
     c1.subheader("Base settings")
     job_config["job_name"] = c1.text_input("Job name", value="New ASTM job")
+    job_config["subsets"] = c1.multiselect("Tomogram subsets to include", options=tomo_subsets, default='all')
     job_config["stride"] = c1.number_input("Stride", value=1, min_value=1)
 
     c2.subheader("Transform")
@@ -556,31 +563,30 @@ available_jobs = [os.path.basename(os.path.dirname(f)) for f in glob.glob(os.pat
 available_jobs = ["Create new job"] + available_jobs
 
 
+# keep selection in session state
 if "selected_job" not in st.session_state:
     st.session_state.selected_job = "Create new job"
+selected_job = st.session_state.selected_job
 
-selected_job = available_jobs[0]
-
+# write selection to query params
 def redirect():
-    redirect_target = st.session_state.selected_job
-    time.sleep(0.5)
-    st.query_params["job_name"] = redirect_target
+    st.query_params["selected_job"] = st.session_state.selected_job
 
-if "job_name" in st.query_params:
-    selected_job = st.query_params["job_name"]
-
-selected_job_idx = 0
+# load selection from query params (if present)
+selected_job = st.query_params.get("selected_job", selected_job)
 if selected_job in available_jobs:
-    selected_job_idx = available_jobs.index(selected_job)
+    st.session_state.selected_job = selected_job
 
-c1, c2, c3 = st.columns([5, 1, 2])
+# UI
+c1, _, c3 = st.columns([5, 1, 2])
 with c1:
-    st.header("Area-selective template matching")
+    st.header("Context-aware particle picking")
 with c3:
-    selected_job = st.selectbox("Select job", options=available_jobs, key="selected_job", on_change=redirect())
+    st.selectbox("Select job", options=available_jobs, key="selected_job", on_change=redirect)
 st.divider()
 
-if selected_job == "Create new job":
+# navigation
+if st.session_state.selected_job == "Create new job":
     new_job()
 else:
-    view_job(selected_job)
+    view_job(st.session_state.selected_job)

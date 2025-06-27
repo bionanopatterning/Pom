@@ -71,7 +71,7 @@ n_ontologies = len(project_configuration["ontologies"]) + 1
 n_macromolecules = len(project_configuration["macromolecules"])
 if "Density" in project_configuration["macromolecules"]:
     n_macromolecules -= 1
-st.markdown(f"The table below lists measurements of the fraction of a tomogram's volume occupied by each of **{n_ontologies} ontology** segmentations and **{n_macromolecules} macromolecule** segmentations.")
+st.markdown(f"The table below lists measurements of the fraction of a tomogram's volume occupied by each of **{n_ontologies} organelle** segmentations and **{n_macromolecules} macromolecule** segmentations.")
 st.markdown(f"Click a **header** element to sort by that feature, or a **tomogram name** to inspect that volume.")
 
 search_query = st.text_input("Search Tomogram by name")
@@ -104,7 +104,7 @@ with st.expander(label="Filters"):
 
 # Create AgGrid options
 gb = GridOptionsBuilder.from_dataframe(filtered_df)
-gb.configure_pagination(enabled=True, paginationPageSize=50)
+gb.configure_pagination(enabled=True, paginationPageSize=200)
 gb.configure_selection('single', use_checkbox=False)  # Allow single row selection
 gb.configure_column('Tomogram', header_name="Tomogram", pinned=True,
                     cellRenderer=JsCode(
@@ -139,7 +139,7 @@ grid_response = AgGrid(
     filtered_df,
     gridOptions=grid_options,
     update_mode=GridUpdateMode.SELECTION_CHANGED,
-    height=900,
+    height=2700,
     theme="streamlit",
     allow_unsafe_jscode=True,  # Allow HTML rendering for clickable links
 )

@@ -28,7 +28,7 @@
   "GPUS": "0,1,2,3,4,5,6,7",
   "image_size": 1024,
   "soft_ignore_in_summary": [],
-  "gallery_categories": ["Macromolecules", "Top3", "density"],
+  "gallery_categories": ["density", "Macromolecules", "Top3"],
   "raytraced_ontologies": false,
   "camera_pitch": -30.0,
   "camera_yaw": 180.0,
