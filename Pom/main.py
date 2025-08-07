@@ -7,6 +7,12 @@ import shutil
 
 root = os.path.dirname(os.path.dirname(__file__))
 
+# TODO: measure thickness
+# TODO: find top and bottom of lamella, measure particle distance to.
+# TODO: add Warp metrics for CTF, movement, etc.
+# TODO: add global context values to the particle subset thing.
+# TODO: add lamella images to the browse tomograms thing.
+
 def main():
     parser = argparse.ArgumentParser(description=f"Ontoseg cli tool")
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
@@ -19,21 +25,21 @@ def main():
     p1sp_train.add_argument('-o', '--ontology', required=False, default="", help='The feature for which to train a network.')
     p1sp_train.add_argument('-all', '--all-features', required=False, default=0, type=int, help="Use '-all 1' to train for all features (overrides -o argument)")
     p1sp_train.add_argument('-gpus', required=False, help='Which GPUs to use, e.g. "0,1,2,3" for GPU 0-3. If used, overrides the GPU usage set in the project configuration.')
-    p1sp_train.add_argument('-c', '--counterexamples', required=False, default=0, help='(1 or 0 (default)). Whether or not to use negative image examples taken from datasets for other features. Images that are annotated as fully A can be used to instruct a model for feature B that that image is fully not B.')
+    p1sp_train.add_argument('-c', '--counterexamples', required=False, default=1, help='(1 or 0 (default)). When 1, all annotations for all organelles are used for training the network. The annotations for the chosen -o are used in full, whereas loss masking is used to ensure only the annotated pixels of all other training datasets are used. ')
 
     p1sp_test = p1sp.add_parser('test', help='Test a single-feature output model for a selected feature.')
     p1sp_test.add_argument('-o', '--ontology', required=True, help='The feature for which to test the trained network.')
     p1sp_test.add_argument('-gpus', required=False, help='Which GPUs to use, e.g. "0,1,2,3" for GPU 0-3. If used, overrides the GPU usage set in the project configuration.')
 
     p1sp_process = p1sp.add_parser('process', help='Process all volumes using a single-featyre output model for a selected feature.')
-    p1sp_process.add_argument('-o', '-ontology', required=True, help='Which feature to segment.')
+    p1sp_process.add_argument('-o', '--ontology', required=True, help='Which feature to segment.')
     p1sp_process.add_argument('-gpus', required=False, help='Which GPUs to use, e.g. "0,1,2,3" for GPU 0-3. If used, overrides the GPU usage set in the project configuration.')
 
     # Shared model commands
     p2p = subparsers.add_parser('shared', help='Initialize, train, or launch phase2 combined models.')
     p2sp = p2p.add_subparsers(dest='phase2_command', help='Shared-model commands')
     p2sp_init = p2sp.add_parser('initialize', help='Compile the training data for the shared model.')
-    p2sp_init.add_argument('-selective', required=False, default=0, help='Whether to use all original training data or only those images where there is an annotation (and not negative training images), for use in the joint training dataset.')
+    p2sp_init.add_argument('-selective', required=False, default=1, help='Whether to use all original training data or only those images where there is at least 1 pixel annotated positively. Default is 1.')
 
     p2sp_train = p2sp.add_parser('train', help='Train a single model to output all configured ontologies.')
     p2sp_train.add_argument('-gpus', required=False, help='Which GPUs to use, e.g. "0,1,2,3" for GPU 0-3. If used, overrides the GPU usage set in the project configuration.')
@@ -48,6 +54,9 @@ def main():
     p3p.add_argument('-overwrite', required=False, default=0, help='Specify whether to re-analyze volumes for which values are already found in the previous summary. Default is 0 (do not overwrite).')
     p3p.add_argument('-skip', '--skip-macromolecules', required=False, default=0, help='Specify whether to re-analyze volumes for which values are already found in the previous summary. Default is 0 (do not overwrite).')
     p3p.add_argument('-feature', '--target-feature', required=False, default=None, help='When used, measure values for only this feature.')
+
+    p3p3_warp = subparsers.add_parser('parse_warp', help='Parse Warp .xml files and add the values to the summary.')
+    p3p3_warp.add_argument('-d', required=False, default='warp_tiltseries', help='Name of the warp tiltseries directory (default is "warp_tiltseries").')
 
     p4p = subparsers.add_parser('render', help='Render segmentations and output .png files.')
     p4p.add_argument('-c', '--configuration', required=False, default="", help='Path to a .json configuration file that specifies named compositions to render for each tomogram. If not supplied, default compositions are the top 3 ontologies and all macromolecules. ')
@@ -114,6 +123,8 @@ def main():
             cli_fn.phase_2_process(gpus)
     elif args.command == 'summarize':
         cli_fn.phase_3_summarize(overwrite=args.overwrite, skip_macromolecules=args.skip_macromolecules, target_feature=args.target_feature)
+    elif args.command == 'parse_warp':
+        cli_fn.phase_3_parse_warp()
     elif args.command == 'render':
         cli_fn.phase_3_render(args.configuration, args.max_number, args.tomogram, args.overwrite, args.processes, args.feature_library_path)
     elif args.command == 'projections':

@@ -292,19 +292,21 @@ def view_job(job_name):
         st.markdown(f"**Pick particles with Ais:**")
         # c1, c2 = st.columns([3, 2], vertical_alignment='bottom')
         # with c1:
-        c = st.columns([3, 1, 1, 1, 1])
+        c = st.columns([3, 1, 1, 1, 1, 1])
         threshold = c[1].number_input("Threshold", min_value=1, max_value=255, step=1, value=128)
-        spacing = c[2].number_input("Spacing (px)", min_value=1, step=1, value=10)
-        size = c[3].number_input("Volume (voxels)", min_value=1, step=1, value=100)
+        spacing = c[2].number_input("Spacing (Å)", min_value=1, step=1, value=200)
+        size = c[3].number_input("Volume (cubic Å)", min_value=1, step=1, value=125000)
         margin = c[4].number_input("Margin (px)", min_value=1, step=1, value=16)
+        binning = c[5].number_input("Binning", min_value=1, step=1, value=3)
 
-        n_proc_use = multiprocessing.cpu_count() // 2
-        st.code(f"ais pick -d {os.path.join(project_configuration['root'], project_configuration['macromolecule_dir'])} -t {job_config['target']} -m {margin} -size-px {size} -spacing-px {spacing} -threshold {threshold} -p {n_proc_use} -ou {os.path.join(project_configuration['root'], 'capp', job_name, 'coordinates')}")
+        n_proc_use = multiprocessing.cpu_count() - 1
+        st.code(f"ais pick -d {os.path.join(project_configuration['root'], project_configuration['macromolecule_dir'])} -t {job_config['target']} -m {margin} -size {size} -spacing {spacing} -threshold {threshold} -p {n_proc_use} -b {binning} -ou {os.path.join(project_configuration['root'], 'capp', job_name, 'coordinates')} -capp {os.path.join(project_configuration['root'], 'capp', job_name, 'config.json')}".replace('\\', '/'))
 
         st.markdown(f"**Sample context with Pom:**")
         c = st.columns([6, 1])
         window_size = c[1].number_input("Window size (px)", min_value=1, step=1, max_value=margin*2, value=margin*2)
         st.code(f"pom capp -c {job_name} -w {window_size} -p {n_proc_use}")
+
 
     with st.expander(f"Detected particles", expanded=True):
         view_particles(job_name)

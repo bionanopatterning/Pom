@@ -49,7 +49,7 @@ def recolor(color, style=0):
 copy_df = copy.deepcopy(df)
 copy_df = copy_df.reset_index()
 copy_df.rename(columns={'tomogram': 'Tomogram'}, inplace=True)
-copy_df = copy_df.round(1)
+copy_df = copy_df.round(3)
 columns = list(copy_df.columns)
 for o in project_configuration["soft_ignore_in_summary"] + project_configuration["macromolecules"]:
     if o in columns:

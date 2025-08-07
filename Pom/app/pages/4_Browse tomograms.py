@@ -107,7 +107,7 @@ tomo_subsets = [os.path.splitext(os.path.basename(j))[0] for j in glob.glob(os.p
 tomo_names = df.index.tolist()
 _, column_base, _ = st.columns([1, 15, 1])
 with column_base:
-    c1, c2, c3 = st.columns([1, 19, 1])
+    _, c1, c2, c3, _ = st.columns([5, 1, 8, 1, 5])
     with c1:
         if st.button(":material/Keyboard_Arrow_Left:"):
             idx = tomo_names.index(tomo_name)
@@ -219,8 +219,8 @@ with column_base:
 
     st.text("")
     ontologies = df.loc[tomo_name].sort_values(ascending=False).index.tolist()
-    for o in project_configuration["macromolecules"] + project_configuration["soft_ignore_in_summary"]:
-        if o in ontologies:
+    for o in ontologies:
+        if o not in project_configuration["ontologies"]:
             ontologies.remove(o)
     for o in project_configuration["soft_ignore_in_summary"]:
         if o not in ontologies:

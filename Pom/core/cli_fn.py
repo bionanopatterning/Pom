@@ -12,7 +12,6 @@ from Pom.core.config import project_configuration, FeatureLibraryFeature, featur
 import shutil
 import starfile
 
-# TODO: add 'filter tomos by <void, cyto. etc.> option'
 
 def phase_1_initialize():
     from Ais.core.se_frame import SEFrame
@@ -126,6 +125,7 @@ def phase_1_initialize():
 
 
 def phase_1_train(gpus, ontology, use_counterexamples=0, all_features=0):
+    # TODO: save models as Ais .scnm files!
     if all_features == 1:
         for f in project_configuration["ontologies"]:
             phase_1_train(gpus=gpus, ontology=f, use_counterexamples=use_counterexamples, all_features=0)
@@ -134,6 +134,7 @@ def phase_1_train(gpus, ontology, use_counterexamples=0, all_features=0):
     import tensorflow as tf
     import keras.callbacks
     from Pom.models.phase1model import create_model
+    from Ais.core.se_model import SEModel
 
     os.environ["CUDA_VISIBLE_DEVICES"] = gpus
 
@@ -166,7 +167,7 @@ def phase_1_train(gpus, ontology, use_counterexamples=0, all_features=0):
                 valid_images.append(np.ones(o_shape[0]))  # here, un-annotated images are guaranteed to be valid.
             else:
                 data['mask'].append(data['y'][-1])
-                valid_images.append(np.zeros(o_shape[0]))  # here, un-annotated regions are NOT guaranteed NOT to be the chosen ontology.
+                valid_images.append(np.zeros(o_shape[0]))  # here, un-annotated regions are NOT guaranteed NOT to be the chosen feature.
 
         for m in ['mask', 'y'] + project_configuration['macromolecules']:
             data[m] = np.concatenate(data[m])
@@ -174,6 +175,7 @@ def phase_1_train(gpus, ontology, use_counterexamples=0, all_features=0):
         data_y = data['y']
         data_m = data['mask']
         data_x = np.zeros((*data_y.shape, len(project_configuration['macromolecules'])), dtype=np.float32)
+
         for j, m in enumerate(project_configuration['macromolecules']):
             data_x[:, :, :, j] = data[m]
 
@@ -218,11 +220,14 @@ def phase_1_train(gpus, ontology, use_counterexamples=0, all_features=0):
     checkpoint_callback = keras.callbacks.ModelCheckpoint(filepath=os.path.join(project_configuration['root'], "models", "phase1", f"{ontology}_checkpoint.h5"), monitor='loss', mode='min', save_best_only=True)
     model.fit(training_data, epochs=project_configuration['single_model_epochs'], steps_per_epoch=data_x.shape[0] // project_configuration['single_model_batch_size'], shuffle=True, callbacks=[checkpoint_callback])
     shutil.move(os.path.join(project_configuration["root"], "models", "phase1", f"{ontology}_checkpoint.h5"), os.path.join(project_configuration["root"], "models", "phase1", f"{ontology}.h5"))
-    print(f'Saved: {os.path.join(project_configuration["root"], "models", "phase1", f"{ontology}.h5")}')
+    se_model = SEModel()
+    se_model.title = ontology
+    se_model.model = model
+    se_model.save(os.path.join(project_configuration["root"], "models", "phase1", f"{ontology}.scnm"))
+    print(f'Saved: {os.path.join(project_configuration["root"], "models", "phase1", f"{ontology}.h5")} and *.scnm (for testing in Ais)')
 
 
 def phase_1_test(gpus, ontology, process=True):
-    """if process == True, apply model to dataset & save to output dir rather than to test."""
     import tensorflow as tf
     import multiprocessing
     import itertools
@@ -247,12 +252,21 @@ def phase_1_test(gpus, ontology, process=True):
             data_x[:, :, :, j] = components[m]
 
         data_y = np.zeros(data_x.shape[0:3], dtype=np.float32)
-
-        normalize = [m == 'Density' for m in project_configuration["macromolecules"]]
+        out_w = 32 * (data_y.shape[1] // 32)
+        out_w_margin = (data_y.shape[1] % 32) // 2
+        out_h = 32 * (data_y.shape[2] // 32)
+        out_h_margin = (data_y.shape[2] % 32) // 2
+        n_runs = max(min(4, project_configuration['shared_model_runs_per_volume']), 1)
         for j in range(data_y.shape[0]):
-            boxes, imgsize, padding, stride = image_to_boxes(data_x[j, :, :, :], boxsize=project_configuration["single_model_box_size"], overlap=project_configuration["single_model_overlap"], normalize=normalize)
-            boxes = model.predict(boxes)
-            data_y[j, :, :] = np.squeeze(boxes_to_image(boxes, imgsize, padding, stride))
+            slice_j = data_x[j, :, :, :]
+            for k in range(n_runs):
+                rotated_slice = np.rot90(slice_j, k=k, axes=(0, 1))
+                w = 32 * (rotated_slice.shape[0] // 32)
+                w_pad = (rotated_slice.shape[0] % 32) // 2
+                h = 32 * (rotated_slice.shape[1] // 32)
+                h_pad = (rotated_slice.shape[1] % 32) // 2
+                data_y[j, out_w_margin:out_w_margin+out_w, out_h_margin:out_h_margin+out_h] += np.rot90(np.squeeze(model.predict(rotated_slice[w_pad:w_pad+w, h_pad:h_pad+h][np.newaxis, :, :])), k=-k, axes=(0, 1))
+        data_y /= n_runs
         return data_y
 
     def _thread(model_path, tomogram_paths, gpu_id, process=False):
@@ -511,7 +525,6 @@ def phase_2_process(gpus="0"):
                 w_pad = (rotated_slice.shape[0] % 32) // 2
                 h = 32 * (rotated_slice.shape[1] // 32)
                 h_pad = (rotated_slice.shape[1] % 32) // 2
-                #segmented_slice = model.predict(rotated_slice[w_pad:w_pad+w, h_pad:h_pad+h][np.newaxis, :, :])
                 data_y[j, out_w_margin:out_w_margin+out_w, out_h_margin:out_h_margin+out_h, :] += np.rot90(np.squeeze(model.predict(rotated_slice[w_pad:w_pad+w, h_pad:h_pad+h][np.newaxis, :, :])), k=-k, axes=(0, 1))
         data_y /= n_runs
         return data_y
@@ -572,52 +585,45 @@ def phase_3_summarize(overwrite=False, skip_macromolecules=False, target_feature
         data_directories.append(project_configuration["macromolecule_dir"])
 
     summary_path = os.path.join(project_configuration["root"], 'summary.xlsx')
-    df = None if not os.path.exists(summary_path) else pd.read_excel(summary_path, index_col=0)
+    df = pd.DataFrame() if not os.path.exists(summary_path) else pd.read_excel(summary_path, index_col=0)
 
     files = list()
     for d in data_directories:
         files += glob.glob(os.path.join(project_configuration["root"], d, "*__*.mrc"))
 
-    data = dict()
-    i = 0
-    for f in files:
-        i += 1
+    valid_features = project_configuration["macromolecules"] + project_configuration["ontologies"] + ["Unknown"]
 
+    print(f'Found {len(files)} files to summarize.')
+
+    for i, f in enumerate(files, start=1):
         tag = os.path.basename(f).split("__")[0]
         feature = os.path.splitext(os.path.basename(f))[0].split("__")[-1]
-        if feature not in project_configuration["macromolecules"] + project_configuration["ontologies"] + ["Unknown"]:
+        if feature not in valid_features:
             continue
         if target_feature is not None and feature != target_feature:
             continue
-        if tag not in data:
-            data[tag] = dict()
+        if not overwrite and tag in df.index and feature in df.columns and not pd.isna(df.at[tag, feature]):
+            continue
 
-        if not overwrite and df is not None:
-            if tag in df.index and feature in df.columns:
-                v = df.loc[tag, feature]
-                if not pd.isna(v):
-                    data[tag][feature] = v
-                    continue
+        print(f"{i}/{len(files)}\t{feature:<30}{os.path.basename(f)}")
 
-        print(f"{i}/{len(files)}\t{feature}{' ' * (30 - len(feature))}{os.path.basename(f)}")
         volume = mrcfile.mmap(f).data
         n_slices_margin = int(project_configuration["z_margin_summary"] * volume.shape[0])
         volume = volume[n_slices_margin:-n_slices_margin, :, :]
 
         if volume[0, 0, 0] == -1:  # then it's a placeholder volume.
             continue
-        if volume.dtype == np.float32:
-            data[tag][feature] = np.sum(volume) * 100.0 / np.prod(volume.shape)
-        else:
-            data[tag][feature] = np.sum(volume) / 255.0 * 100.0 / np.prod(volume.shape)
 
-    keys = sorted(list(data.keys()))
-    sorted_data = dict()
-    for k in keys:
-        sorted_data[k] = data[k]
-    df = pd.DataFrame.from_dict(sorted_data, orient='index')
+        if volume.dtype == np.float32:
+            val = np.sum(volume) * 100.0 / np.prod(volume.shape)
+        else:
+            val = np.sum(volume) / 255.0 * 100.0 / np.prod(volume.shape)
+
+        df.at[tag, feature] = val
+
     if "Void" in df.columns:
         df.sort_values(by="Void")
+
     df.to_excel(summary_path, index=True, index_label="Tomogram")
 
     print(f"Dataset summary saved at {summary_path}")
@@ -923,7 +929,9 @@ def phase_3_projections(overwrite=False, parallel_processes=1):
 
 
 def phase_3_browse():
-    os.system(f"streamlit run {os.path.join(os.path.dirname(os.path.dirname(__file__)), 'app', 'Introduction.py')}")
+    app_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'app', 'Introduction.py')
+    print(f'streamlit run "{app_path}"')
+    os.system(f'streamlit run "{app_path}"')
 
 
 def phase_3_capp(config_file_path, context_window_size, bin_factor, parallel):
@@ -942,7 +950,6 @@ def phase_3_capp(config_file_path, context_window_size, bin_factor, parallel):
 
     def _capp_job(tomo, job_dir, target, context_window_size, bin_factor, context_elements):
 
-        coordinates = list()
         coordinate_path = os.path.join(job_dir, "coordinates", f"{tomo}__{target}_coords.star")
         df = starfile.read(coordinate_path)
 
@@ -1239,3 +1246,40 @@ def phase_3_astm_pick(config_file_path, threshold, spacing, spacing_px=None, par
     with open(os.path.join(data_directory, "all_particles.tsv"), 'w') as f:
         for p in particles:
             f.write(f"{p}")
+
+
+def phase_3_parse_warp(warp_tiltseries_directory='warp_tiltseries'):
+    import pandas as pd,xml.etree.ElementTree as ET
+
+    def collapse_xml(_, key, value):
+        if key == 'Param':
+            return value['@Name'], value['@Value']
+        return key, value
+
+
+    summary_path = os.path.join(project_configuration["root"], 'summary.xlsx')
+    df = None if not os.path.exists(summary_path) else pd.read_excel(summary_path, index_col=0)
+
+    if not os.path.exists(warp_tiltseries_directory):
+        print(f"Warp tiltseries directory '{warp_tiltseries_directory}' does not exist. Exiting.")
+        return
+
+    all_tomos = ['_'.join(os.path.basename(os.path.splitext(f)[0]).split('_')[:-1]) for f in glob.glob(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], "*.mrc"))]
+    warp_suffix = os.path.splitext(glob.glob(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], "*.mrc"))[0])[0].split('_')[-1]
+
+    for j, tomo in enumerate(all_tomos, start=1):
+        tomo_xml = os.path.join(warp_tiltseries_directory, f"{tomo}.xml")
+        print(f"{j}/{len(all_tomos)} - {tomo_xml}")
+
+        warp_data = ET.parse(tomo_xml).getroot()
+
+        ctf = {p.get('Name'): p.get('Value') for p in warp_data.find('.//CTF').findall('Param')}
+
+        ctf_resolution_estimate = float(warp_data.get('CTFResolutionEstimate'))
+        ctf_defocus = ctf['Defocus']
+        # now write to df; but mind that warp names the tomogram something_10.00Apx and the tomostar something.tomostar. annoying.
+        df.at[f"{tomo}_{warp_suffix}", 'CTFDefocus'] = ctf_defocus
+        df.at[f"{tomo}_{warp_suffix}", 'CTFResolutionEstimate'] = ctf_resolution_estimate
+
+
+    df.to_excel(summary_path, index=True, index_label="Tomogram")
