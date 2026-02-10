@@ -4,25 +4,12 @@ from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, Conv2DTranspose
 from tensorflow.keras.optimizers import Adam
 
 
-# def dice_loss(y_true, y_pred, epsilon=1e-6):
-#     # Flatten the tensors to make it easier to compute the dice score
-#     y_true_f = tf.reshape(y_true, [-1])
-#     y_pred_f = tf.reshape(y_pred, [-1])
-#
-#     # Compute the Dice coefficient
-#     numerator = 2 * tf.reduce_sum(y_true_f * y_pred_f)
-#     denominator = tf.reduce_sum(y_true_f + y_pred_f)
-#
-#     dice_coeff = (numerator + epsilon) / (denominator + epsilon)
-#     dice_loss = 1 - dice_coeff
-#     return dice_loss
-
-
-# def combined_loss(y_true, y_pred):
-#     bce = tf.keras.losses.binary_crossentropy(y_true, y_pred)
-#     d_loss = dice_loss(y_true, y_pred)
-#     return d_loss
-
+def masked_binary_crossentropy(y_true, y_pred):
+    labels = y_true[..., 0:1]
+    mask = y_true[..., 1]
+    bce = tf.keras.losses.binary_crossentropy(labels, y_pred)
+    masked_bce = tf.reduce_sum(bce * mask) / (tf.reduce_sum(mask) + 1e-7)
+    return masked_bce
 
 def create_model(input_shape, output_dimensionality=1):
     inputs = Input(input_shape)
@@ -100,6 +87,6 @@ def create_model(input_shape, output_dimensionality=1):
     model = Model(inputs=[inputs], outputs=[output])
 
     # Compile the model with a suitable optimizer and loss function
-    model.compile(optimizer=Adam(learning_rate=2.5e-5), loss='binary_crossentropy', metrics=['accuracy'])
+    model.compile(optimizer=Adam(learning_rate=2.5e-5), loss=masked_binary_crossentropy, metrics=['accuracy'])
 
     return model

@@ -2,6 +2,7 @@ import os
 import glob
 import pickle
 import mrcfile
+import numpy as np
 import tifffile
 import time
 import json
@@ -9,18 +10,15 @@ from Pom.core.util import *
 import copy
 from Pom.core.config import project_configuration, FeatureLibraryFeature, feature_library, parse_feature_library
 import shutil
+import starfile
 
-# TODO: add 'filter tomos by <void, cyto. etc.> option'
 
 def phase_1_initialize():
     from Ais.core.se_frame import SEFrame
-    from Ais.main import windowless
 
     os.makedirs(os.path.join(project_configuration['root'], "training_datasets"), exist_ok=True)
     os.makedirs(os.path.join(project_configuration['root'], "training_datasets", "phase1"), exist_ok=True)
-    os.makedirs(os.path.join(project_configuration['root'], "training_datasets", "phase1", "counter"), exist_ok=True)
-
-    windowless()
+    #os.makedirs(os.path.join(project_configuration['root'], "training_datasets", "phase1", "counter"), exist_ok=True)
 
     data = dict()
     n_annotated_tomos = dict()
@@ -31,7 +29,10 @@ def phase_1_initialize():
         for m in project_configuration['macromolecules']:
             data[o][m] = list()
 
+    print(f"Looking for .scns files at {os.path.join(project_configuration['root'], project_configuration['tomogram_dir'], '*.scns')}")
     annotated_datasets = glob.glob(os.path.join(project_configuration['root'], project_configuration['tomogram_dir'], "*.scns"))
+    print(f"Found {len(annotated_datasets)} .scns files.")
+
     for j, scns in enumerate(annotated_datasets):
         print(f"Annotated dataset {j+1}/{len(annotated_datasets)}: {os.path.basename(scns)}")
         try:
@@ -42,19 +43,26 @@ def phase_1_initialize():
             continue
         tomo_name = os.path.splitext(os.path.basename(scns))[0]
         macromolecules = dict()
+        all_macromolecules_found = True
         for m in project_configuration["macromolecules"]:
             if m == "Density":
                 path = os.path.join(project_configuration['root'], project_configuration['tomogram_dir'], tomo_name + f".mrc")
             else:
                 path = os.path.join(project_configuration['root'], project_configuration["macromolecule_dir"], tomo_name + f"__{m}.mrc")
+            if not os.path.exists(path):
+                print(f"Expected {path} but it does not exist, skipping {scns}.")
+                all_macromolecules_found = False
+                continue
             macromolecules[m] = mrcfile.mmap(path)
-
+        if not all_macromolecules_found:
+            continue
         for feature in se_frame.features:
             o = feature.title
             if o not in project_configuration['ontologies']:
+                print(f"Skipping:\t{o} ")
                 continue
             n_annotated_tomos[o] += 1
-            print(f"\t{o}")
+            print(f"Parsing:\t{o}")
             for z in feature.boxes.keys():
                 for (j, k) in feature.boxes[z]:
                     j_min = (j - project_configuration['ontology_annotation_box_size'] // 2)
@@ -94,29 +102,30 @@ def phase_1_initialize():
     print()
 
     # Save all boxes where annotation is full 1's, as extra negative examples for other classes
-    for o in data:
-        n_full_o_images = 0
-        counter_data = dict()
-        counter_data['y'] = list()
-        for m in project_configuration["macromolecules"]:
-            counter_data[m] = list()
-        for j in range(len(data[o]['y'])):
-            annotation = data[o]['y'][j]
-            if 0.0 not in annotation:
-                n_full_o_images += 1
-                counter_data['y'].append(np.zeros_like(annotation))
-                for m in project_configuration["macromolecules"]:
-                    counter_data[m].append(data[o][m][j])
-        if n_full_o_images > 0:
-            for m in counter_data:
-                dataset = np.array(counter_data[m])
-                tifffile.imwrite(os.path.join(project_configuration["root"], "training_datasets", "phase1", "counter", f"{o}_{m}.tif"), dataset)
-            print(f"{o}:{' '*(35 - len(o))}{dataset.shape[0]} counter-training images.")
+    # for o in data:
+    #     n_full_o_images = 0
+    #     counter_data = dict()
+    #     counter_data['y'] = list()
+    #     for m in project_configuration["macromolecules"]:
+    #         counter_data[m] = list()
+    #     for j in range(len(data[o]['y'])):
+    #         annotation = data[o]['y'][j]
+    #         if 0.0 not in annotation:
+    #             n_full_o_images += 1
+    #             counter_data['y'].append(np.zeros_like(annotation))
+    #             for m in project_configuration["macromolecules"]:
+    #                 counter_data[m].append(data[o][m][j])
+    #     if n_full_o_images > 0:
+    #         for m in counter_data:
+    #             dataset = np.array(counter_data[m])
+    #             tifffile.imwrite(os.path.join(project_configuration["root"], "training_datasets", "phase1", "counter", f"{o}_{m}.tif"), dataset)
+    #         print(f"{o}:{' '*(35 - len(o))}{dataset.shape[0]} counter-training images.")
 
     print(f"Training datasets generated and saved to: \t/{os.path.join(project_configuration['root'], 'training_datasets')}")
 
 
 def phase_1_train(gpus, ontology, use_counterexamples=0, all_features=0):
+    # TODO: save models as Ais .scnm files!
     if all_features == 1:
         for f in project_configuration["ontologies"]:
             phase_1_train(gpus=gpus, ontology=f, use_counterexamples=use_counterexamples, all_features=0)
@@ -125,6 +134,7 @@ def phase_1_train(gpus, ontology, use_counterexamples=0, all_features=0):
     import tensorflow as tf
     import keras.callbacks
     from Pom.models.phase1model import create_model
+    from Ais.core.se_model import SEModel
 
     os.environ["CUDA_VISIBLE_DEVICES"] = gpus
 
@@ -140,30 +150,47 @@ def phase_1_train(gpus, ontology, use_counterexamples=0, all_features=0):
                 data_out.append(np.flip(_img, axis=0))
         return np.array(data_out)
 
-    def load_data(channel='y'):
-        # load the original training data.
-        data_paths = [os.path.join(project_configuration['root'], "training_datasets", "phase1", f"{ontology}_{channel}.tif")]
-        if use_counterexamples == 1:
-            for o in project_configuration['ontologies']:
-                if ontology == o:
-                    continue
-                o_path = os.path.join(project_configuration['root'], "training_datasets", "phase1", "counter", f"{o}_{channel}.tif")
-                if os.path.exists(o_path):
-                    data_paths.append(o_path)
-        datasets = list()
-        for p in data_paths:
-            print(f"Loading: {p}")
-            datasets.append(tifffile.imread(p).astype(np.float32))
-        print()
-        datasets = np.concatenate(datasets)
-        return datasets
+    def load_data():
+        data = dict()
+        for m in ['mask', 'y'] + project_configuration['macromolecules']:
+            data[m] = list()
 
-    data_y = add_redundancy(load_data('y'))
+        valid_images = list()
+        for o in project_configuration['ontologies']:
+            if not use_counterexamples and o != ontology:
+                continue
+            for m in ['y'] + project_configuration['macromolecules']:
+                data[m].append(tifffile.imread(os.path.join(project_configuration['root'], "training_datasets", "phase1", f"{o}_{m}.tif")).astype(np.float32))
+            o_shape = data['y'][-1].shape
+            if o == ontology:
+                data['mask'].append(np.ones(o_shape))
+                valid_images.append(np.ones(o_shape[0]))  # here, un-annotated images are guaranteed to be valid.
+            else:
+                data['mask'].append(data['y'][-1])
+                valid_images.append(np.zeros(o_shape[0]))  # here, un-annotated regions are NOT guaranteed NOT to be the chosen feature.
 
-    data_x = np.zeros((*data_y.shape, len(project_configuration['macromolecules'])))
+        for m in ['mask', 'y'] + project_configuration['macromolecules']:
+            data[m] = np.concatenate(data[m])
 
-    for j, m in enumerate(project_configuration['macromolecules']):
-        data_x[:, :, :, j] = add_redundancy(load_data(m))
+        data_y = data['y']
+        data_m = data['mask']
+        data_x = np.zeros((*data_y.shape, len(project_configuration['macromolecules'])), dtype=np.float32)
+
+        for j, m in enumerate(project_configuration['macromolecules']):
+            data_x[:, :, :, j] = data[m]
+
+        valid_images = np.concatenate(valid_images)
+        valid_images = (valid_images + np.sum(data_m, axis=(1, 2))) > 0  # if guaranteed valid OR mask is not all zeroes -> use in training
+
+        data_y = data_y[valid_images, :, :]
+        data_m = data_m[valid_images, :, :]
+        data_x = data_x[valid_images, :, :, :]
+        return data_x, data_y, data_m
+
+    data_x, data_y, data_m = load_data()
+    data_x = add_redundancy(data_x)
+    data_y = add_redundancy(data_y)
+    data_m = add_redundancy(data_m)
 
     def tf_data_generator():
         n_samples = data_x.shape[0]
@@ -174,10 +201,10 @@ def phase_1_train(gpus, ontology, use_counterexamples=0, all_features=0):
             for i in range(0, n_samples, project_configuration['single_model_batch_size']):
                 batch_indices = indices[i:i + project_configuration['single_model_batch_size']]
                 batch_x = data_x[batch_indices]
-                batch_y = data_y[batch_indices]
+                batch_y = np.stack([data_y[batch_indices], data_m[batch_indices]], axis=-1)
                 yield batch_x, batch_y
 
-    training_data = tf.data.Dataset.from_generator(tf_data_generator, output_signature=(tf.TensorSpec(shape=(None, data_x.shape[1], data_x.shape[2], data_x.shape[3]), dtype=tf.float32), tf.TensorSpec(shape=(None, data_y.shape[1], data_y.shape[2]), dtype=tf.float32)))
+    training_data = tf.data.Dataset.from_generator(tf_data_generator, output_signature=(tf.TensorSpec(shape=(None, data_x.shape[1], data_x.shape[2], data_x.shape[3]), dtype=tf.float32), tf.TensorSpec(shape=(None, data_y.shape[1], data_y.shape[2], 2), dtype=tf.float32)))
     options = tf.data.Options()
     options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
     training_data = training_data.with_options(options)
@@ -188,16 +215,19 @@ def phase_1_train(gpus, ontology, use_counterexamples=0, all_features=0):
 
     print(f"Training a model for {ontology} with inputs:")
     [print(f"\t{m}") for m in project_configuration['macromolecules']]
-    print(f"and {data_y.shape[0]} input images.")
+    print(f"and {data_y.shape[0]} training images.")
 
     checkpoint_callback = keras.callbacks.ModelCheckpoint(filepath=os.path.join(project_configuration['root'], "models", "phase1", f"{ontology}_checkpoint.h5"), monitor='loss', mode='min', save_best_only=True)
     model.fit(training_data, epochs=project_configuration['single_model_epochs'], steps_per_epoch=data_x.shape[0] // project_configuration['single_model_batch_size'], shuffle=True, callbacks=[checkpoint_callback])
     shutil.move(os.path.join(project_configuration["root"], "models", "phase1", f"{ontology}_checkpoint.h5"), os.path.join(project_configuration["root"], "models", "phase1", f"{ontology}.h5"))
-    print(f'Saved: {os.path.join(project_configuration["root"], "models", "phase1", f"{ontology}.h5")}')
+    se_model = SEModel()
+    se_model.title = ontology
+    se_model.model = model
+    se_model.save(os.path.join(project_configuration["root"], "models", "phase1", f"{ontology}.scnm"))
+    print(f'Saved: {os.path.join(project_configuration["root"], "models", "phase1", f"{ontology}.h5")} and *.scnm (for testing in Ais)')
 
 
 def phase_1_test(gpus, ontology, process=True):
-    """if process == True, apply model to dataset & save to output dir rather than to test."""
     import tensorflow as tf
     import multiprocessing
     import itertools
@@ -222,12 +252,21 @@ def phase_1_test(gpus, ontology, process=True):
             data_x[:, :, :, j] = components[m]
 
         data_y = np.zeros(data_x.shape[0:3], dtype=np.float32)
-
-        normalize = [m == 'Density' for m in project_configuration["macromolecules"]]
+        out_w = 32 * (data_y.shape[1] // 32)
+        out_w_margin = (data_y.shape[1] % 32) // 2
+        out_h = 32 * (data_y.shape[2] // 32)
+        out_h_margin = (data_y.shape[2] % 32) // 2
+        n_runs = max(min(4, project_configuration['shared_model_runs_per_volume']), 1)
         for j in range(data_y.shape[0]):
-            boxes, imgsize, padding, stride = image_to_boxes(data_x[j, :, :, :], boxsize=project_configuration["single_model_box_size"], overlap=project_configuration["single_model_overlap"], normalize=normalize)
-            boxes = model.predict(boxes)
-            data_y[j, :, :] = np.squeeze(boxes_to_image(boxes, imgsize, padding, stride))
+            slice_j = data_x[j, :, :, :]
+            for k in range(n_runs):
+                rotated_slice = np.rot90(slice_j, k=k, axes=(0, 1))
+                w = 32 * (rotated_slice.shape[0] // 32)
+                w_pad = (rotated_slice.shape[0] % 32) // 2
+                h = 32 * (rotated_slice.shape[1] // 32)
+                h_pad = (rotated_slice.shape[1] % 32) // 2
+                data_y[j, out_w_margin:out_w_margin+out_w, out_h_margin:out_h_margin+out_h] += np.rot90(np.squeeze(model.predict(rotated_slice[w_pad:w_pad+w, h_pad:h_pad+h][np.newaxis, :, :])), k=-k, axes=(0, 1))
+        data_y /= n_runs
         return data_y
 
     def _thread(model_path, tomogram_paths, gpu_id, process=False):
@@ -367,7 +406,7 @@ def phase_2_initialize(selective=False):
     ontologies.remove("Unknown")
 
     print(f"Saved phase2 training data. Image sizes:\n\tin:  {data_x.shape}\n\tout: {one_hot_y.shape}")
-    print(f"Features:\n\tin:  {project_configuration['macromolecules']}\n\tout:  {project_configuration['ontologies']}")
+    print(f"Features:\n\tin:  {project_configuration['macromolecules']}\n\tout:  {project_configuration['ontologies']+['Unknown']}")
 
 
 def phase_2_train(gpus, checkpoint=''):
@@ -455,6 +494,8 @@ def phase_2_process(gpus="0"):
         for m in project_configuration["macromolecules"]:
             if m == 'Density':
                 components[m] = preprocess_volume(mrcfile.read(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], f"{tomo_name}.mrc")))
+                components[m] -= np.mean(components[m])
+                components[m] /= np.std(components[m])
             elif m == '_':
                 components[f'_{n_placeholders}'] = None
                 n_placeholders += 1
@@ -471,17 +512,20 @@ def phase_2_process(gpus="0"):
             data_x[:, :, :, j] = components[m]
 
         data_y = np.zeros((*data_x.shape[0:3], n_features), dtype=np.float32)
-
-        normalize = [m == 'Density' for m in project_configuration["macromolecules"]]
+        out_w = 32 * (data_y.shape[1] // 32)
+        out_w_margin = (data_y.shape[1] % 32) // 2
+        out_h = 32 * (data_y.shape[2] // 32)
+        out_h_margin = (data_y.shape[2] % 32) // 2
         n_runs = max(min(4, project_configuration['shared_model_runs_per_volume']), 1)
         for j in range(data_y.shape[0]):
             slice_j = data_x[j, :, :, :]
             for k in range(n_runs):
                 rotated_slice = np.rot90(slice_j, k=k, axes=(0, 1))
-                boxes, imgsize, padding, stride = image_to_boxes(rotated_slice, boxsize=project_configuration["shared_model_box_size"], overlap=project_configuration["shared_model_overlap"], normalize=normalize)
-                boxes = model.predict(boxes)
-                segmented_slice = np.rot90(np.squeeze(boxes_to_image(boxes, imgsize, padding, stride)), k=-k, axes=(0, 1))
-                data_y[j, :, :, :] += segmented_slice
+                w = 32 * (rotated_slice.shape[0] // 32)
+                w_pad = (rotated_slice.shape[0] % 32) // 2
+                h = 32 * (rotated_slice.shape[1] // 32)
+                h_pad = (rotated_slice.shape[1] % 32) // 2
+                data_y[j, out_w_margin:out_w_margin+out_w, out_h_margin:out_h_margin+out_h, :] += np.rot90(np.squeeze(model.predict(rotated_slice[w_pad:w_pad+w, h_pad:h_pad+h][np.newaxis, :, :])), k=-k, axes=(0, 1))
         data_y /= n_runs
         return data_y
 
@@ -534,7 +578,6 @@ def phase_2_process(gpus="0"):
 
 
 def phase_3_summarize(overwrite=False, skip_macromolecules=False, target_feature=None):
-    ## TODO: get mean vals from header instead of loading the whole vol
     import pandas as pd
 
     data_directories = [project_configuration["output_dir"]]
@@ -542,52 +585,45 @@ def phase_3_summarize(overwrite=False, skip_macromolecules=False, target_feature
         data_directories.append(project_configuration["macromolecule_dir"])
 
     summary_path = os.path.join(project_configuration["root"], 'summary.xlsx')
-    df = None if not os.path.exists(summary_path) else pd.read_excel(summary_path, index_col=0)
+    df = pd.DataFrame() if not os.path.exists(summary_path) else pd.read_excel(summary_path, index_col=0)
 
     files = list()
     for d in data_directories:
         files += glob.glob(os.path.join(project_configuration["root"], d, "*__*.mrc"))
 
-    data = dict()
-    i = 0
-    for f in files:
-        i += 1
+    valid_features = project_configuration["macromolecules"] + project_configuration["ontologies"] + ["Unknown"]
 
+    print(f'Found {len(files)} files to summarize.')
+
+    for i, f in enumerate(files, start=1):
         tag = os.path.basename(f).split("__")[0]
         feature = os.path.splitext(os.path.basename(f))[0].split("__")[-1]
-        if feature not in project_configuration["macromolecules"] + project_configuration["ontologies"] + ["Unknown"]:
+        if feature not in valid_features:
             continue
         if target_feature is not None and feature != target_feature:
             continue
-        if tag not in data:
-            data[tag] = dict()
+        if not overwrite and tag in df.index and feature in df.columns and not pd.isna(df.at[tag, feature]):
+            continue
 
-        if not overwrite and df is not None:
-            if tag in df.index and feature in df.columns:
-                v = df.loc[tag, feature]
-                if not pd.isna(v):
-                    data[tag][feature] = v
-                    continue
+        print(f"{i}/{len(files)}\t{feature:<30}{os.path.basename(f)}")
 
-        print(f"{i}/{len(files)}\t{feature}{' ' * (20 - len(feature))}{os.path.basename(f)}")
         volume = mrcfile.mmap(f).data
         n_slices_margin = int(project_configuration["z_margin_summary"] * volume.shape[0])
         volume = volume[n_slices_margin:-n_slices_margin, :, :]
 
         if volume[0, 0, 0] == -1:  # then it's a placeholder volume.
             continue
-        if volume.dtype == np.float32:
-            data[tag][feature] = np.sum(volume) * 100.0 / np.prod(volume.shape)
-        else:
-            data[tag][feature] = np.sum(volume) / 255.0 * 100.0 / np.prod(volume.shape)
 
-    keys = sorted(list(data.keys()))
-    sorted_data = dict()
-    for k in keys:
-        sorted_data[k] = data[k]
-    df = pd.DataFrame.from_dict(sorted_data, orient='index')
+        if volume.dtype == np.float32:
+            val = np.sum(volume) * 100.0 / np.prod(volume.shape)
+        else:
+            val = np.sum(volume) / 255.0 * 100.0 / np.prod(volume.shape)
+
+        df.at[tag, feature] = val
+
     if "Void" in df.columns:
         df.sort_values(by="Void")
+
     df.to_excel(summary_path, index=True, index_label="Tomogram")
 
     print(f"Dataset summary saved at {summary_path}")
@@ -652,6 +688,8 @@ def render_volumes(renderer, tomo_path, requested_compositions, feature_library,
         image_base_name = os.path.basename(os.path.splitext(tomo_path)[0])
         out_images = dict()
         for composition_name in requested_compositions:
+            if requested_compositions[composition_name] == []:
+                continue
             renderer.new_image()
             renderer.render([renderables[f] for f in requested_compositions[composition_name] if f in renderables])
             image = renderer.get_image()
@@ -687,6 +725,8 @@ def render_volumes(renderer, tomo_path, requested_compositions, feature_library,
                 j = int(feature.split("rank")[-1]) - 1
                 if j < len(available_ontologies):
                     feature = available_ontologies[j]
+                else:
+                    continue
             if "!" in feature:
                 continue
             composition_features.append(feature)
@@ -694,6 +734,7 @@ def render_volumes(renderer, tomo_path, requested_compositions, feature_library,
                 print(f"Feature {feature} not in feature library!")
                 feature_library[feature] = FeatureLibraryFeature()
                 feature_library[feature].title = feature
+
         tomo_req_compositions[name] = composition_features
 
     render_compositions(tomo_path, tomo_req_compositions, feature_library, overwrite=overwrite)
@@ -756,7 +797,7 @@ def phase_3_render(composition_path="", n=-1, tomo_name='', overwrite=False, par
     # df = df.sort_values(by="ATP synthase", ascending=False)
     # df = df[df["Mitochondrion"] >= 10.0]
     # all_tomograms = [os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], f"{t}.mrc") for t in df.index]
-
+    print(f"Preparing to render images for {len(all_tomograms)} tomograms.")
     parallel_processes = int(parallel_processes)
     if parallel_processes == 1:
         _thread(all_tomograms, df, m_feature_library)
@@ -888,7 +929,9 @@ def phase_3_projections(overwrite=False, parallel_processes=1):
 
 
 def phase_3_browse():
-    os.system(f"streamlit run {os.path.join(os.path.dirname(os.path.dirname(__file__)), 'app', 'Introduction.py')}")
+    app_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'app', 'Introduction.py')
+    print(f'streamlit run "{app_path}"')
+    os.system(f'streamlit run "{app_path}"')
 
 
 def phase_3_capp(config_file_path, context_window_size, bin_factor, parallel):
@@ -907,19 +950,27 @@ def phase_3_capp(config_file_path, context_window_size, bin_factor, parallel):
 
     def _capp_job(tomo, job_dir, target, context_window_size, bin_factor, context_elements):
 
-        coordinates = list()
-        coordinate_path = os.path.join(job_dir, "coordinates", f"{tomo}__{target}_coords.tsv")
-        with open(coordinate_path, 'r') as f:
-            for line in f:
-                c = line.split('\t')
-                coordinates.append((int(c[0]), int(c[1]), int(c[2])))
+        coordinate_path = os.path.join(job_dir, "coordinates", f"{tomo}__{target}_coords.star")
+        df = starfile.read(coordinate_path)
 
+        coordinates = list(
+            zip(
+                df['rlnCoordinateX'].astype(int),
+                df['rlnCoordinateY'].astype(int),
+                df['rlnCoordinateZ'].astype(int)
+            )
+        )
         out_lines = list()
         out_header = "X\tY\tZ"
         context_volumes = dict()
         for f in context_elements:
             out_header += f"\t{f}"
-            context_volumes[f] = mrcfile.mmap(os.path.join(project_configuration["root"], project_configuration["output_dir"], f"{tomo}__{f}.mrc")).data
+            context_volume_path = os.path.join(project_configuration["root"], project_configuration["output_dir"], f"{tomo}__{f}.mrc")
+            if os.path.exists(context_volume_path):
+                context_volumes[f] = mrcfile.mmap(context_volume_path).data
+            else:
+                context_volumes[f] = None
+                print(f"Context volume {context_volume_path} does not exists - writing context value of 0 as placeholder.")
         out_header += "\n"
 
         w = context_window_size // 2 // bin_factor
@@ -934,8 +985,11 @@ def phase_3_capp(config_file_path, context_window_size, bin_factor, parallel):
             j //= bin_factor
 
             for f in context_volumes:
-                v_context = copy(context_volumes[f][j-w:j+w+1, k-w:k+w+1, l-w:l+w+1])
-                v_context = np.mean(v_context)
+                if context_volumes[f] is None:
+                    v_context = 0.0
+                else:
+                    v_context = copy(context_volumes[f][j-w:j+w+1, k-w:k+w+1, l-w:l+w+1])
+                    v_context = np.mean(v_context)
                 out_lines[-1] += f"\t{v_context:.3f}"
 
             out_lines[-1] += "\n"
@@ -949,7 +1003,7 @@ def phase_3_capp(config_file_path, context_window_size, bin_factor, parallel):
             _capp_job(p, job_dir, target, context_window_size, bin_factor, context_elements)
             print(f"{j+1}/{len(tomos)} (thread {thread_id}) - {p}")
 
-    tomos = [os.path.basename(f).split('__')[0] for f in glob.glob(os.path.join(job_dir, "coordinates", "*.tsv"))]
+    tomos = [os.path.basename(f).split('__')[0] for f in glob.glob(os.path.join(job_dir, "coordinates", "*.star"))]
     print(f"Found {len(tomos)} coordinate files in {os.path.join(job_dir, 'coordinates')}")
     if len(tomos) == 0:
         return
@@ -987,6 +1041,7 @@ def phase_3_capp(config_file_path, context_window_size, bin_factor, parallel):
         f.write(header)
         for l in combined_lines:
             f.write(l)
+
 
 def phase_3_astm_run(config_file_path, overwrite, save_indices=False, save_masks=False, tomo=None):
     import Pommie
@@ -1098,6 +1153,7 @@ def phase_3_astm_run(config_file_path, overwrite, save_indices=False, save_masks
             print(e)
             print()
 
+
 def phase_3_astm_pick(config_file_path, threshold, spacing, spacing_px=None, parallel=1, max_particles_per_tomogram=1e9, blur_kernel_px=0):
     from Ais.core.util import peak_local_max
     import itertools
@@ -1190,3 +1246,40 @@ def phase_3_astm_pick(config_file_path, threshold, spacing, spacing_px=None, par
     with open(os.path.join(data_directory, "all_particles.tsv"), 'w') as f:
         for p in particles:
             f.write(f"{p}")
+
+
+def phase_3_parse_warp(warp_tiltseries_directory='warp_tiltseries'):
+    import pandas as pd,xml.etree.ElementTree as ET
+
+    def collapse_xml(_, key, value):
+        if key == 'Param':
+            return value['@Name'], value['@Value']
+        return key, value
+
+
+    summary_path = os.path.join(project_configuration["root"], 'summary.xlsx')
+    df = None if not os.path.exists(summary_path) else pd.read_excel(summary_path, index_col=0)
+
+    if not os.path.exists(warp_tiltseries_directory):
+        print(f"Warp tiltseries directory '{warp_tiltseries_directory}' does not exist. Exiting.")
+        return
+
+    all_tomos = ['_'.join(os.path.basename(os.path.splitext(f)[0]).split('_')[:-1]) for f in glob.glob(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], "*.mrc"))]
+    warp_suffix = os.path.splitext(glob.glob(os.path.join(project_configuration["root"], project_configuration["tomogram_dir"], "*.mrc"))[0])[0].split('_')[-1]
+
+    for j, tomo in enumerate(all_tomos, start=1):
+        tomo_xml = os.path.join(warp_tiltseries_directory, f"{tomo}.xml")
+        print(f"{j}/{len(all_tomos)} - {tomo_xml}")
+
+        warp_data = ET.parse(tomo_xml).getroot()
+
+        ctf = {p.get('Name'): p.get('Value') for p in warp_data.find('.//CTF').findall('Param')}
+
+        ctf_resolution_estimate = float(warp_data.get('CTFResolutionEstimate'))
+        ctf_defocus = ctf['Defocus']
+        # now write to df; but mind that warp names the tomogram something_10.00Apx and the tomostar something.tomostar. annoying.
+        df.at[f"{tomo}_{warp_suffix}", 'CTFDefocus'] = ctf_defocus
+        df.at[f"{tomo}_{warp_suffix}", 'CTFResolutionEstimate'] = ctf_resolution_estimate
+
+
+    df.to_excel(summary_path, index=True, index_label="Tomogram")

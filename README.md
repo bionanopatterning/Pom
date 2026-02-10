@@ -21,5 +21,5 @@ Automation and improved hardware have greatly accelerated the rate of data gener
 
 **Ais model repository**: https://www.aiscryoet.org/
 
-**Area-selective template matching**: https://www.github.com/bionanopatterning/Pommer
+**Area-selective template matching**: https://www.github.com/bionanopatterning/Pommie
 
