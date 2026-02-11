@@ -1,13 +1,9 @@
 import streamlit as st
-import json
-import os
 import copy
-from PIL import Image
-import pandas as pd
 import numpy as np
-from Pom.core.config import parse_feature_library, FeatureLibraryFeature
-import matplotlib.pyplot as plt
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
+from Pom.app.util import load_data
+from Pom.core.tools import get_feature_library
 from matplotlib import colors
 
 st.set_page_config(
@@ -15,64 +11,16 @@ st.set_page_config(
     layout='wide'
 )
 
-with open("project_configuration.json", 'r') as f:
-    project_configuration = json.load(f)
-
-
-feature_library = parse_feature_library(os.path.join(os.path.expanduser("~"), ".Ais", "feature_library.txt"))
-df = pd.read_excel(os.path.join(project_configuration["root"], "summary.xlsx"), index_col=0)
-df = df.dropna(axis=0)
-
-
-with open("project_configuration.json", 'r') as f:
-    project_configuration = json.load(f)
-
-
-
-def get_image(tomo, image):
-    image_dir = image.split("_")[0]
-    img_path = os.path.join(project_configuration["image_dir"], image_dir, f"{tomo}_{image}.png")
-    if os.path.exists(img_path):
-        return Image.open(img_path)
-    else:
-        return Image.fromarray(np.zeros((128, 128)), mode='L')
-
-def recolor(color, style=0):
-    c = color
-    if style == 0:
-        c =  np.array(color) / 2.0 + 0.5
-    if style == 1:
-        c = np.array(color) / 8 + 0.875
-    c = np.clip(c, 0, 1)
-    return c
+df = load_data()
 
 copy_df = copy.deepcopy(df)
 copy_df = copy_df.reset_index()
 copy_df.rename(columns={'tomogram': 'Tomogram'}, inplace=True)
 copy_df = copy_df.round(3)
-columns = list(copy_df.columns)
-for o in project_configuration["soft_ignore_in_summary"] + project_configuration["macromolecules"]:
-    if o in columns:
-        columns.remove(o)
-        columns.append(o)
-copy_df = copy_df[columns]
 
-
-column_colors = dict()
-for k in copy_df.columns:
-    if k not in feature_library:
-        feature_library[k] = FeatureLibraryFeature()
-        feature_library[k].title = k
-    column_colors[k] = recolor(feature_library[k].colour, 1)
-
-
-st.title("Dataset summary")
-n_ontologies = len(project_configuration["ontologies"]) + 1
-n_macromolecules = len(project_configuration["macromolecules"])
-if "Density" in project_configuration["macromolecules"]:
-    n_macromolecules -= 1
-st.markdown(f"The table below lists measurements of the fraction of a tomogram's volume occupied by each of **{n_ontologies} organelle** segmentations and **{n_macromolecules} macromolecule** segmentations.")
-st.markdown(f"Click a **header** element to sort by that feature, or a **tomogram name** to inspect that volume.")
+st.title("Dataset Summary")
+st.markdown(f"The table below lists measurements of the fraction of a tomogram's volume occupied by each of the segmented features.")
+st.markdown(f"Click a **header** to sort by that feature, or a **tomogram name** to inspect that volume.")
 
 search_query = st.text_input("Search Tomogram by name")
 if search_query:
@@ -125,11 +73,26 @@ gb.configure_column('Tomogram', header_name="Tomogram", pinned=True,
                     ),
                     )
 
-for k in column_colors:
-    if k == "Tomogram":
-        gb.configure_column(k, cellStyle={'backgroundColor': colors.to_hex((0.98, 0.98, 0.98))})
-    else:
-        gb.configure_column(k, cellStyle={'backgroundColor': colors.to_hex(column_colors[k])})
+# Apply feature colors to cells (lightened by averaging with white)
+def lighten_color(hex_color):
+    """Convert hex color to RGB, average with white, return as RGB tuple (0-1 range)."""
+    hex_color = hex_color.lstrip('#')
+    r, g, b = int(hex_color[0:2], 16) / 255.0, int(hex_color[2:4], 16) / 255.0, int(hex_color[4:6], 16) / 255.0
+    # Average with white (1.0, 1.0, 1.0)
+    r_light = (r + 1.0) / 2.0
+    g_light = (g + 1.0) / 2.0
+    b_light = (b + 1.0) / 2.0
+    return (r_light, g_light, b_light)
+
+feature_library = get_feature_library()
+for col in numerical_columns:
+    if col in feature_library and 'color' in feature_library[col]:
+        hex_color = feature_library[col]['color']
+        rgb_color = lighten_color(hex_color)
+        gb.configure_column(
+            col,
+            cellStyle={'backgroundColor': colors.to_hex(rgb_color)}
+        )
 
 grid_options = gb.build()
 

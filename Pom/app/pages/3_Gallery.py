@@ -1,73 +1,31 @@
 import streamlit as st
-import json
-import pandas as pd
 import os
-from PIL import Image
-import numpy as np
 import glob
-
-# ----------------------------------------------------------------------------------
-# Page configuration
-# ----------------------------------------------------------------------------------
+import json
+from Pom.app.util import load_data, get_image
 
 st.set_page_config(
     page_title="Tomogram Gallery",
     layout="wide",
 )
 
-# ----------------------------------------------------------------------------------
-# Load configuration & helpers
-# ----------------------------------------------------------------------------------
-
-with open("project_configuration.json", "r") as f:
-    project_configuration = json.load(f)
-
-
-def get_image(tomo: str, image: str):
-    """Return a PIL image for a given tomogram name and display option."""
-    image_tag = image.split(" projection")[0]
-    image_dir = image_tag if "projection" not in image else f"{image_tag}_projection"
-    img_path = os.path.join(
-        project_configuration["image_dir"], image_dir, f"{tomo}_{image_tag}.png"
-    )
-
-    if os.path.exists(img_path):
-        out_img = Image.open(img_path)
-        if "density" in image or "projection" in image:
-            out_img = out_img.transpose(Image.FLIP_TOP_BOTTOM)
-        return out_img
-
-    # fallback: return an empty placeholder
-    return Image.fromarray(np.zeros((128, 128), dtype=np.uint8), mode="L")
-
-
-@st.cache_data
-def load_data() -> pd.DataFrame:
-    """Load and cache summary.xlsx as a DataFrame."""
-    cache_df = pd.read_excel(
-        os.path.join(project_configuration["root"], "summary.xlsx"), index_col=0
-    )
-    return cache_df.dropna(axis=0)
-
-
-# ----------------------------------------------------------------------------------
-# Load data & prepare session state
-# ----------------------------------------------------------------------------------
-
 df = load_data()
 
-tomo_subsets = [
-    os.path.splitext(os.path.basename(j))[0]
-    for j in glob.glob(os.path.join(project_configuration["root"], "subsets", "*.json"))
-]
+tomo_subsets = [os.path.splitext(os.path.basename(j))[0] for j in glob.glob(os.path.join("pom", "subsets", "*.txt"))]
 
-# Initialise Streamlit session state defaults
+# Load compositions
+compositions_path = os.path.join('pom', 'image_compositions.json')
+if os.path.exists(compositions_path):
+    with open(compositions_path, 'r') as f:
+        compositions = list(json.load(f).keys())
+else:
+    compositions = []
+
 st.session_state.setdefault("page_num", 0)
 st.session_state.setdefault("search_query", "")
 st.session_state.setdefault("display_option", "density")
 st.session_state.setdefault("n_cols", 5)
 st.session_state.setdefault("subset", "all")
-# NEW: sorting controls
 st.session_state.setdefault("sort_column", "None")
 st.session_state.setdefault("sort_ascending", False)
 
@@ -75,11 +33,6 @@ st.session_state.setdefault("sort_ascending", False)
 def reset_page_number():
     """Utility to jump back to the first page when filters change."""
     st.session_state.page_num = 0
-
-
-# ----------------------------------------------------------------------------------
-# Sidebar / toolbar controls
-# ----------------------------------------------------------------------------------
 
 st.title("Tomogram Gallery")
 st.write(
@@ -106,11 +59,9 @@ with controls[1]:
         on_change=reset_page_number,
     )
 
-# Display option (density / projections)
+# Display option
 with controls[2]:
-    options = project_configuration["gallery_categories"] + [
-        f"{o} projection" for o in project_configuration["ontologies"] + ["Unknown"]
-    ]
+    options = ['density'] + compositions + [f'{o}_projection' for o in list(df.columns)]
     st.selectbox("Display option", options, key="display_option")
 
 # Sort column selector (NEW)
@@ -122,15 +73,13 @@ with controls[3]:
         on_change=reset_page_number,
     )
 
-# Ascending toggle (bottom aligned)
+# Ascending toggle
 with controls[4]:
-    st.markdown("<div style='margin-top: 24px'>", unsafe_allow_html=True)
     st.toggle(
         "ascending",
         key="sort_ascending",
         on_change=reset_page_number,
     )
-    st.markdown("</div>", unsafe_allow_html=True)
 
 # Columns selector (same row)
 with controls[5]:
@@ -158,11 +107,9 @@ if st.session_state.search_query:
 
 # Apply subset filter
 if st.session_state.subset != "all":
-    subset_json = os.path.join(
-        project_configuration["root"], "subsets", f"{st.session_state.subset}.json"
-    )
-    with open(subset_json, "r") as f:
-        subset_tomos = json.load(f)["tomos"]
+    subset_txt = os.path.join("pom", "subsets", f"{st.session_state.subset}.txt")
+    with open(subset_txt, "r") as f:
+        subset_tomos = [line.strip() for line in f if line.strip()]
     tomogram_names = [name for name in tomogram_names if name in subset_tomos]
 
 # Apply sorting (NEW)
@@ -219,7 +166,7 @@ for idx in range(0, len(tomograms_page), n_cols):
                 unsafe_allow_html=True,
             )
             # Image
-            st.image(get_image(tomo_name, st.session_state.display_option), use_container_width=True)
+            st.image(get_image(tomo_name, st.session_state.display_option), width="stretch")
 
 # ----------------------------------------------------------------------------------
 # Pagination buttons

@@ -9,23 +9,24 @@ from setuptools import setup, find_packages
 
 setup(
     name='Pom-cryoET',
-    version='1.0.0',
+    version='1.1.0',
     packages=find_packages(),
     entry_points={'console_scripts': ['pom=Pom.main:main']},
     license='GPL v3',
-    author='mgflast',
-    author_email='m.g.f.last@lumc.nl',
+    author='Mart G. F. Last',
+    author_email='mlast@mrc-lmb.cam.ac.uk',
     long_description_content_type="text/markdown",
-    package_data={'': ['*.png', '*.glsl', '*.pdf', '*.txt', '*.json']},
-    include_package_data=False,  # weirdly, the above filetypes _are_ included when this parameter is set to False.
+    package_data={
+        '': ['*.png', '*.glsl', '*.pdf', '*.txt', '*.json'],
+        'Pom.core': ['defaults/*.json']
+    },
+    include_package_data=True,
     install_requires=[
-        "Ais-cryoET>=1.0.41",
         "matplotlib",
-        "openpyxl",
         "pandas",
         "streamlit",
         "streamlit-aggrid",
-        "Pommie"
+        "starfile"
     ]
 )
 

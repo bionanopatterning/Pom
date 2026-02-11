@@ -1,10 +1,8 @@
-Ais-cryoET>=1.0.40
 mrcfile>=1.5.3
 numpy<2.0
 tifffile>=2024.8.30
-openpyxl
 pandas
+starfile
 streamlit
 streamlit-aggrid
 matplotlib
-Pommie
