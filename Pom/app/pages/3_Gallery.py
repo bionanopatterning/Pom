@@ -3,6 +3,7 @@ import os
 import glob
 import json
 from Pom.app.util import load_data, get_image
+from PIL import Image
 
 st.set_page_config(
     page_title="Tomogram Gallery",
@@ -166,7 +167,10 @@ for idx in range(0, len(tomograms_page), n_cols):
                 unsafe_allow_html=True,
             )
             # Image
-            st.image(get_image(tomo_name, st.session_state.display_option), width="stretch")
+            img = get_image(tomo_name, st.session_state.display_option)
+            if 'projection' in st.session_state.display_option:
+                img.transpose(Image.FLIP_TOP_BOTTOM)
+            st.image(img, width="stretch")
 
 # ----------------------------------------------------------------------------------
 # Pagination buttons

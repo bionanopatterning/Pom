@@ -51,53 +51,37 @@ void main()
         vec3 emissive = dot(normalize(fnormal), localViewDir) * F_EMISSIVE * color.rgb;
         fragColour = vec4(ambient + diffuse + specular + emissive, color.a);
     }
-    else if (style == 1) // Phong - Enhanced
+    else if (style == 1) // Phong - Soft Summer
     {
-        // Lighting intensities
-        float F_AMBIENT = ambientStrength * 0.7;
-        float F_DIFFUSE = lightStrength;
-        float F_SPECULAR = 0.35 * lightStrength;
-        float F_RIM = 0.4;
-
-        // Specular sharpness (higher = tighter highlights)
-        float SPEC_POWER = 48.0;
+        float F_AMBIENT = 0.85;
+        float F_DIFFUSE = 0.2 * lightStrength;
+        float F_SPECULAR = 0.15 * lightStrength;
+        float F_RIM = 0.15;
+        float SPEC_POWER = 32.0;
 
         vec3 N = normalize(fnormal);
         vec3 L = normalize(lightDir);
         vec3 V = normalize(viewDir);
         vec3 R = reflect(-L, N);
 
-        // === AMBIENT with fake AO ===
-        // Darken downward-facing surfaces slightly for depth
-        float ao = mix(0.6, 1.0, N.y * 0.5 + 0.5);
-        vec3 ambient = F_AMBIENT * color.rgb * ao;
+        // Ambient - dominant, bright base
+        vec3 ambient = F_AMBIENT * color.rgb;
 
-        // === DIFFUSE with wrap-around ===
-        // Wrap lighting prevents harsh black shadows
+        // Soft diffuse wrap
         float NdotL = dot(N, L);
-        float diffuseWrap = max(0.0, (NdotL + 0.3) / 1.3);  // Wrap around
+        float diffuseWrap = max(0.0, (NdotL + 0.5) / 1.5);
         vec3 diffuse = diffuseWrap * F_DIFFUSE * lightColour * color.rgb;
 
-        // === SPECULAR ===
-        // Crisp highlights with subtle warm tint
+        // Gentle specular
         float specIntensity = pow(max(dot(V, R), 0.0), SPEC_POWER);
-        vec3 specColor = mix(vec3(1.0), lightColour * 1.2, 0.3);  // Subtle light color tint
-        vec3 specular = F_SPECULAR * specIntensity * specColor;
+        vec3 specular = F_SPECULAR * specIntensity * lightColour;
 
-        // === RIM LIGHT (Fresnel) ===
-        // Strong edge highlighting for clarity and style
+        // Subtle rim
         float rimDot = 1.0 - max(dot(N, V), 0.0);
-        float rimIntensity = pow(rimDot, 3.0);  // Cubic falloff for sharper rims
-        vec3 rimColor = mix(color.rgb, vec3(1.0), 0.4);  // Brighten rim slightly
-        vec3 rim = F_RIM * rimIntensity * rimColor;
+        float rimIntensity = pow(rimDot, 3.0);
+        vec3 rim = F_RIM * rimIntensity * mix(color.rgb, vec3(1.0), 0.3);
 
-        // === COLOR BOOST ===
-        // Slightly increase saturation in lit areas for more pop
-        vec3 finalColor = ambient + diffuse + specular + rim;
-        float luminance = dot(finalColor, vec3(0.299, 0.587, 0.114));
-        vec3 boostedColor = mix(finalColor, color.rgb, -0.1);  // Subtle color boost
-
-        fragColour = vec4(boostedColor, color.a);
+        fragColour = vec4(ambient + diffuse + specular + rim, color.a);
     }
     else if (style == 2) // Flat
     {

@@ -33,7 +33,7 @@ class Renderer:
         self.ray_trace_shader = Shader(os.path.join(module_root, "..", "shaders", "raytrace_volume.glsl"))
         self.ndc_img_shader = Shader(os.path.join(module_root, "..", "shaders", "ndc_image.glsl"))
 
-        self.style = 0
+        self.style = 1
 
         self.image_size = image_size
         self.texture3d = glGenTextures(1, GL_TEXTURE_3D)
@@ -62,7 +62,7 @@ class Renderer:
         self.camera.on_update()
         self.volume_fbo_active = False
         self.light = Light3D()
-        self.ambient_strength = 0.75
+        self.ambient_strength = 1.2
         self.background_colour = (1.0, 1.0, 1.0, 0.0)
 
     @staticmethod
@@ -307,7 +307,7 @@ class Renderer:
 class SurfaceModel:
     def __init__(self, data, feature_definition, pixel_size):
         self.data = data
-        self.data = gaussian_filter(data, sigma=feature_definition['sigma'] / pixel_size)
+        self.data = gaussian_filter(data, sigma=feature_definition['sigma'] / max(1.0, pixel_size))
 
         self.data[0, :, :] = 0
         self.data[-1, :, :] = 0
@@ -459,7 +459,7 @@ class Light3D:
         self.vec = (0.0, 1.0, 0.0)
         self.yaw = 20.0
         self.pitch = 0.0
-        self.strength = 0.5
+        self.strength = 0.8
 
     def compute_vec(self, dyaw=0, dpitch=0):
         # Calculate the camera forward vector based on pitch and yaw

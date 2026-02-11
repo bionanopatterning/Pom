@@ -5,6 +5,7 @@ import mrcfile
 import numpy as np
 from multiprocessing import Pool
 from tqdm import tqdm
+import pandas as pd
 
 DEFAULT_COLOURS = {
     "membrane": "#ff9999",
@@ -119,6 +120,20 @@ def get_tomogram_by_name(tomo):
         path = os.path.join(src, f'{tomo}.mrc')
         if os.path.isfile(path):
             return path
+        path = os.path.join(src, f'{tomo}')
+        if os.path.isfile(path):
+            return path
+    return None
+
+def get_segmentation_for_tomogram(tomo, feature):
+    config = get_config()
+    for src in config['segmentation_sources']:
+        path = os.path.join(src, f'{tomo}__{feature}.mrc')
+        if os.path.isfile(path):
+            return path
+        path = os.path.join(src, f'{tomo.replace(".mrc", "")}__{feature}.mrc')
+        if os.path.isfile(path):
+            return path
     return None
 
 def list_sources():
@@ -189,13 +204,6 @@ def summarize(overwrite=False, target_feature=None):
     config = get_config()
     summary_path = os.path.join('pom', 'summary.star')
 
-    if not os.path.exists(summary_path) or overwrite:
-        df = pd.DataFrame()
-    else:
-        df = starfile.read(os.path.join('pom', 'summary.star'), parse_as_string=["tomogram"])
-        df = df.set_index('tomogram')
-        df.index = df.index.astype(str)
-
     tomograms = []
     for src in config['tomogram_sources']:
         tomograms.extend(glob.glob(os.path.join(src, '*.mrc')))
@@ -205,6 +213,20 @@ def summarize(overwrite=False, target_feature=None):
     if len(tomograms) == 0:
         print("No tomograms found")
         return
+
+    if not os.path.exists(summary_path) or overwrite:
+        tomo_names = [str(os.path.splitext(os.path.basename(t))[0]) for t in tomograms]
+        df = pd.DataFrame(index=tomo_names)
+        df.index.name = 'tomogram'
+    else:
+        df = starfile.read(summary_path, parse_as_string=["tomogram"])
+        df = df.set_index('tomogram')
+        df.index = df.index.astype(str)
+        # add any new tomograms
+        for t in tomograms:
+            name = str(os.path.splitext(os.path.basename(t))[0])
+            if name not in df.index:
+                df.loc[name] = np.nan
 
     tasks = []
     for tomo_path in tomograms:
@@ -218,8 +240,6 @@ def summarize(overwrite=False, target_feature=None):
                 segmentations[feature_name] = seg_path
 
         if len(segmentations) == 0:
-            if tomo_name not in df.index:
-                df.loc[tomo_name] = np.nan
             continue
 
         for feature_name, seg_file in segmentations.items():
@@ -267,11 +287,17 @@ def _process_projection(args):
             central_idx = volume.shape[0] // 2
             slice_data = volume[central_idx, :, :]
         else:
+            max_value = 127 if volume.dtype == np.int8 else 255 if volume.dtype == np.uint16 else 1.0
+            volume[volume < max_value * 3 // 4] = 0
             slice_data = np.sum(volume, axis=0)
 
         p_low, p_high = np.percentile(slice_data, [1, 99])
         slice_data = np.clip(slice_data, p_low, p_high)
-        slice_data = ((slice_data - p_low) / (p_high - p_low) * 255).astype(np.uint8)
+        denom = p_high - p_low
+        if denom == 0:
+            slice_data = np.zeros_like(slice_data, dtype=np.uint8)
+        else:
+            slice_data = ((slice_data - p_low) / denom * 255).astype(np.uint8)
 
         img = Image.fromarray(slice_data, mode='L')
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -300,7 +326,7 @@ def projections():
             output_path = os.path.join('pom', 'images', f'{feature_name}_projection', f'{tomo_name}.png')
             tasks.append((seg_path, output_path, False))
 
-    print(f"Projecting {len(tasks)} segmentations with {workers} workers...")
+    print(f"Projecting volumes for {len(tasks)} segmentations with {workers} workers...")
 
     with Pool(workers) as pool:
         results = list(tqdm(pool.imap(_process_projection, tasks), total=len(tasks)))
@@ -412,8 +438,8 @@ def render(overwrite=True):
     for src in config['tomogram_sources']:
         tomograms.extend(glob.glob(os.path.join(src, '*.mrc')))
 
-    parallel_processes = os.cpu_count()
-    print(f"Rendering {len(tomograms)} tomograms in {len(compositions)} compositions with {parallel_processes} workers...")
+    parallel_processes = min(os.cpu_count(), 64)
+    print(f"Rendering {len(tomograms)} tomograms in {len(compositions)} {'composition' if len(compositions) == 1 else 'compositions'} with {parallel_processes} workers...")
 
     # Divide tomograms among processes
     process_div = {p: [] for p in range(parallel_processes)}
@@ -462,4 +488,124 @@ def render(overwrite=True):
             proc.join()
         print("Rendering cancelled.")
 
+def _contextualize_job(df, feature_radius_pairs, tomogram_name):
+    tomogram_path = get_tomogram_by_name(tomogram_name)
+    if tomogram_path is None:
+        print(f'Original tomogram (.mrc) for {tomogram_name} missing.')
+        return
+    with mrcfile.open(tomogram_path, header_only=True) as mrc:
+        apix = mrc.voxel_size.x
+    if "rlnCoordinateX" in df.columns:
+        x = df["rlnCoordinateX"].values
+        y = df["rlnCoordinateY"].values
+        z = df["rlnCoordinateZ"].values
+    elif "wrpCoordinateX1" in df.columns:
+        x = df["wrpCoordinateX1"].values / apix
+        y = df["wrpCoordinateY1"].values / apix
+        z = df["wrpCoordinateZ1"].values / apix
 
+    coordinates = np.stack([z, y, x], axis=1)
+
+    def spherical_mask(radius, apix):
+        _r = int(np.ceil(radius / apix))
+        grid = np.arange(-_r, _r+1)
+        jj, kk, ll = np.meshgrid(grid, grid, grid, indexing='ij')
+        mask = (jj**2 + kk**2 + ll**2) < (radius / apix)**2
+        indices = np.stack([jj[mask], kk[mask], ll[mask]], axis=1)
+        return indices
+
+    for feature, radius in feature_radius_pairs:
+        column_name = f"pom{feature.replace('_', ' ').title().replace(' ', '')}{int(radius)}A"
+        segmentation_path = get_segmentation_for_tomogram(tomogram_name, feature)
+        if segmentation_path is None:
+            df[column_name] = np.nan
+            continue
+
+        segmentation_volume = mrcfile.read(segmentation_path)
+        normalization_value = 127 if segmentation_volume.dtype == np.int8 else 255 if segmentation_volume.dtype == np.uint16 else 1.0
+        indices = spherical_mask(radius, apix)
+
+        context_values = np.full(len(coordinates), np.nan, dtype=np.float32)
+        for j, (cj, ck, cl) in enumerate(coordinates):
+            c = np.array([cj, ck, cl]).round().astype(int)
+            sample_indices = indices + c
+            within_bounds = np.all((sample_indices >= 0) & (sample_indices < segmentation_volume.shape), axis=1)
+            sample_indices = sample_indices[within_bounds]
+
+            context_values[j] = np.mean(segmentation_volume[sample_indices[:, 0], sample_indices[:, 1], sample_indices[:, 2]].astype(np.float32)) / normalization_value
+
+        df[column_name] = context_values
+
+    return df
+
+
+def _contextualize_worker(tomo_batch, feature_radius_pairs, df, tomo_col, counter, lock):
+    results = {}
+    for df_tomo_name, mrc_tomo_name in tomo_batch:
+        df_subset = df[df[tomo_col] == df_tomo_name].copy()
+        results[df_tomo_name] = _contextualize_job(df_subset, feature_radius_pairs, mrc_tomo_name)
+        with lock:
+            counter.value += 1
+    return results
+
+
+def contextualize_starfile(star_path, samplers, tomogram_name=None, substitutions=None, out_star=None):
+    import itertools, multiprocessing, time
+    df = starfile.read(star_path)
+
+    print()
+    feature_radius_pairs = [(f[0], float(f[1])) for f in [s.split(':') for s in samplers]]
+    for f in set(f for f, r in feature_radius_pairs):
+        n_feature_volumes = 0
+        for src in get_config()['segmentation_sources']:
+            pattern = os.path.join(src, f'*__{f}.mrc')
+            n_feature_volumes += len(glob.glob(pattern))
+        print(f'found {n_feature_volumes} volumes for feature "{f}".')
+    print()
+
+    tomo_col = tomogram_name or ("rlnMicrographName" if "rlnMicrographName" in df.columns else "wrpSourceName")
+    if tomo_col not in df.columns:
+        print(f'No column "{tomo_col}" found in {star_path}. Aborting.')
+        return
+
+    parallel_processes = os.cpu_count()
+    tomograms = df[tomo_col].unique()
+    process_div = {p: [] for p in range(parallel_processes)}
+    for p, tomogram in zip(itertools.cycle(range(parallel_processes)), tomograms):
+        mrc_tomo_name = tomogram
+        if substitutions:
+            for search, replace in [s.split(':', 1) for s in substitutions]:
+                mrc_tomo_name = mrc_tomo_name.replace(search, replace)
+        process_div[p].append((tomogram, mrc_tomo_name))
+
+    manager = multiprocessing.Manager()
+    counter = manager.Value('i', 0)
+    lock = manager.Lock()
+
+    print(f'sampling context for {len(tomograms)} tomograms with {parallel_processes} workers.')
+    with multiprocessing.Pool(processes=parallel_processes) as pool:
+        async_results = [pool.apply_async(_contextualize_worker,
+                                          (process_div[p], feature_radius_pairs, df, tomo_col, counter, lock))
+                         for p in range(parallel_processes)]
+
+        with tqdm(total=len(tomograms)) as pbar:
+            last_value = 0
+            while not all(r.ready() for r in async_results):
+                current_value = counter.value
+                if current_value > last_value:
+                    pbar.update(current_value - last_value)
+                    last_value = current_value
+                time.sleep(0.1)
+
+            current_value = counter.value
+            if current_value > last_value:
+                pbar.update(current_value - last_value)
+
+        results = [r.get() for r in async_results]
+
+    output_df = pd.concat([df_result for batch_results in results for df_result in batch_results.values()], ignore_index=True)
+
+    if out_star is None:
+        starfile.write(output_df, star_path)
+    else:
+        starfile.write(output_df, out_star)

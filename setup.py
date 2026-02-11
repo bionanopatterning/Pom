@@ -9,7 +9,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='Pom-cryoET',
-    version='1.1.0',
+    version='1.2.0',
     packages=find_packages(),
     entry_points={'console_scripts': ['pom=Pom.main:main']},
     license='GPL v3',
@@ -24,9 +24,10 @@ setup(
     install_requires=[
         "matplotlib",
         "pandas",
-        "streamlit",
+        "streamlit>=1.50.0",
         "streamlit-aggrid",
-        "starfile"
+        "starfile",
+        "tqdm",
     ]
 )
 

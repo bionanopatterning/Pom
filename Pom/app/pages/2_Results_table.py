@@ -48,7 +48,10 @@ with st.expander(label="Filters"):
 
     # Apply the filters to the DataFrame
     for col, (min_val, max_val) in slider_filters.items():
-        filtered_df = filtered_df[(filtered_df[col] >= min_val) & (filtered_df[col] <= max_val)]
+        if min_val > 0.0:
+            filtered_df = filtered_df[(filtered_df[col] >= min_val) & (filtered_df[col] <= max_val)]
+        else:
+            filtered_df = filtered_df[(filtered_df[col].isna()) | ((filtered_df[col] >= min_val) & (filtered_df[col] <= max_val))]
 
 # Create AgGrid options
 gb = GridOptionsBuilder.from_dataframe(filtered_df)
@@ -78,10 +81,9 @@ def lighten_color(hex_color):
     """Convert hex color to RGB, average with white, return as RGB tuple (0-1 range)."""
     hex_color = hex_color.lstrip('#')
     r, g, b = int(hex_color[0:2], 16) / 255.0, int(hex_color[2:4], 16) / 255.0, int(hex_color[4:6], 16) / 255.0
-    # Average with white (1.0, 1.0, 1.0)
-    r_light = (r + 1.0) / 2.0
-    g_light = (g + 1.0) / 2.0
-    b_light = (b + 1.0) / 2.0
+    r_light = (r + 3.0) / 4.0
+    g_light = (g + 3.0) / 4.0
+    b_light = (b + 3.0) / 4.0
     return (r_light, g_light, b_light)
 
 feature_library = get_feature_library()
