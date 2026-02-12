@@ -1,13 +1,10 @@
 import streamlit as st
-import pandas as pd
-import starfile
-import os
-import glob
-import json
 import matplotlib.pyplot as plt
-from PIL import Image
 from Pom.app.util import *
 from Pom.core.tools import get_feature_library
+import numpy as np
+from matplotlib.colors import to_rgb
+
 
 st.set_page_config(
     page_title="Introduction",
@@ -34,14 +31,14 @@ def feature_summary(df, feature):
     c1, c2 = st.columns(2)
     with c1:
         st.markdown(f"**High {feature} content:**")
-        img_high = get_image(tomo_high, feature)
+        img_high = get_image(tomo_high, "density")
         if img_high:
             st.image(img_high, width="stretch")
         high_link = f"/Browse_tomograms?tomo_id={tomo_high}"
         st.markdown(f"[{tomo_high}]({high_link})")
     with c2:
         st.markdown(f"**Low {feature} content:**")
-        img_low = get_image(tomo_low, feature)
+        img_low = get_image(tomo_low, "density")
         if img_low:
             st.image(img_low, width="stretch")
         low_link = f"/Browse_tomograms?tomo_id={tomo_low}"
@@ -69,6 +66,7 @@ with c2:
     # Get colors from feature library
     feature_library = get_feature_library()
     pie_colors = [feature_library.get(feature, {}).get('color', '#808080') for feature in pie_data.keys()]
+    pie_colors = [np.array(to_rgb(c)) / 3 + 2 / 3 for c in pie_colors]
 
     fig, ax = plt.subplots()
     ax.pie(

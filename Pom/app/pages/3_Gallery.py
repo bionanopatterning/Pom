@@ -169,7 +169,7 @@ for idx in range(0, len(tomograms_page), n_cols):
             # Image
             img = get_image(tomo_name, st.session_state.display_option)
             if 'projection' in st.session_state.display_option:
-                img.transpose(Image.FLIP_TOP_BOTTOM)
+                img = img.transpose(Image.FLIP_TOP_BOTTOM)
             st.image(img, width="stretch")
 
 # ----------------------------------------------------------------------------------

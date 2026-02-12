@@ -186,10 +186,10 @@ def _process_segmentation(args):
 
         if volume.dtype == np.float32:
             max_val = 1.0
-        elif volume.dtype == np.uint8:
-            max_val = 255.0
+        elif volume.dtype == np.int8:
+            max_val = 127
         elif volume.dtype == np.uint16:
-            max_val = 65535.0
+            max_val = 255
         else:
             max_val = float(np.iinfo(volume.dtype).max)
 
@@ -281,14 +281,14 @@ def _process_projection(args):
     from PIL import Image
     file_path, output_path, is_tomogram = args
     try:
-        volume = mrcfile.mmap(file_path).data
+        volume = mrcfile.read(file_path)
 
         if is_tomogram:
             central_idx = volume.shape[0] // 2
             slice_data = volume[central_idx, :, :]
         else:
             max_value = 127 if volume.dtype == np.int8 else 255 if volume.dtype == np.uint16 else 1.0
-            volume[volume < max_value * 3 // 4] = 0
+            volume[volume < max_value / 2] = 0
             slice_data = np.sum(volume, axis=0)
 
         p_low, p_high = np.percentile(slice_data, [1, 99])
