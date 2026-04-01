@@ -321,7 +321,7 @@ class SurfaceModel:
         self.level = feature_definition['threshold']
 
         if self.data.dtype == np.float32:
-            pass
+            self.data[self.data == 2] = 0 # little hack for easymode 3D data + pom visualization, to be removed eventually
         elif self.data.dtype == np.int8:
             self.level *= 127
         elif self.data.dtype == np.uint16:

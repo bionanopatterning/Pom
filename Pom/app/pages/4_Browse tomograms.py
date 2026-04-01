@@ -15,33 +15,50 @@ st.set_page_config(
 
 os.makedirs(os.path.join("pom", "subsets"), exist_ok=True)
 
+def _tomo_name_from_entry(entry):
+    """Return the bare tomogram name from a subset entry (full path or plain name)."""
+    return os.path.splitext(os.path.basename(entry))[0]
+
+def _migrate_subset_to_full_paths(subset_path, entries):
+    # backwards compatibility (260331): rewrite plain tomo names to full paths on first read
+    needs_migration = any(os.sep not in e and '/' not in e for e in entries)
+    if not needs_migration:
+        return entries
+    migrated = []
+    for e in entries:
+        if os.sep not in e and '/' not in e:
+            migrated.append(get_tomogram_by_name(e) or e)
+        else:
+            migrated.append(e)
+    with open(subset_path, 'w') as f:
+        f.write('\n'.join(migrated) + '\n')
+    return migrated
+
 def read_subset(subset):
     subset_path = os.path.join("pom", "subsets", f"{subset}.txt")
     if os.path.exists(subset_path):
-        return [t for t in open(subset_path).read().splitlines() if t.strip()]
+        entries = [t for t in open(subset_path).read().splitlines() if t.strip()]
+        return _migrate_subset_to_full_paths(subset_path, entries)
     else:
         return []
 
 def add_to_subset(subset, tomo):
+    from Pom.core.tools import get_tomogram_by_name
     subset_path = os.path.join("pom", "subsets", f"{subset}.txt")
-    if not os.path.exists(subset_path):
+    full_path = get_tomogram_by_name(tomo) or tomo
+    tomos = read_subset(subset)
+    if tomo not in [_tomo_name_from_entry(t) for t in tomos]:
+        tomos.append(full_path)
         with open(subset_path, 'w') as f:
-            f.write(f'{tomo}\n')
-    else:
-        tomos = read_subset(subset)
-        if tomo not in tomos:
-            tomos.append(tomo)
-            with open(subset_path, 'w') as f:
-                f.write('\n'.join(tomos) + '\n')
+            f.write('\n'.join(tomos) + '\n')
 
 def remove_from_subset(subset, tomo):
     subset_path = os.path.join("pom", "subsets", f"{subset}.txt")
     if os.path.exists(subset_path):
         tomos = read_subset(subset)
-        if tomo in tomos:
-            tomos.remove(tomo)
-            with open(subset_path, 'w') as f:
-                f.write('\n'.join(tomos) + '\n')
+        tomos = [t for t in tomos if _tomo_name_from_entry(t) != tomo]
+        with open(subset_path, 'w') as f:
+            f.write('\n'.join(tomos) + '\n')
 
 def create_subset():
     name = st.session_state.new_subset_name.strip()
@@ -68,6 +85,9 @@ def open_in_ais(tomo_name):
     cmd_path = os.path.join(os.path.expanduser("~"), ".Ais", "pom_to_ais.cmd")
     with open(cmd_path, 'a') as f:
         mrc_path = os.path.abspath(get_tomogram_by_name(tomo_name))
+        aislink_path = mrc_path.replace('.mrc', '.aislink')
+        if os.path.exists(aislink_path):
+            mrc_path = f'Z:/compu_projects/easymode/volumes_cryocare/{open(aislink_path).read().strip()}'
         scns_path = mrc_path.replace('.mrc', '.scns')
         if os.path.exists(scns_path):
             f.write(f"open\t{scns_path}\n")
@@ -80,7 +100,7 @@ if "tomo_id" in st.query_params:
     tomo_name = st.query_params["tomo_id"]
 
 
-tomo_subsets = [os.path.splitext(os.path.basename(j))[0] for j in glob.glob(os.path.join("pom", "subsets", "*.txt"))]
+tomo_subsets = sorted([os.path.splitext(os.path.basename(j))[0] for j in glob.glob(os.path.join("pom", "subsets", "*.txt"))])
 
 tomo_names = df.index.tolist()
 _, column_base, _ = st.columns([1, 15, 1])
@@ -105,19 +125,20 @@ with column_base:
 
     " "
     # Ais link and subsets
-    file_found = os.path.exists(get_tomogram_by_name(tomo_name))
+    tomo_file = get_tomogram_by_name(tomo_name)
+    file_found = tomo_file and os.path.exists(tomo_file)
     if file_found:
         columns = st.columns([1.2, 5, 1.5], vertical_alignment="bottom")
         if columns[0].button("Open in Ais", type="primary", width="stretch"):
             open_in_ais(tomo_name)
     else:
-        columns = st.columns([0, 5, 2], vertical_alignment="bottom")
+        columns = st.columns([0.01, 5, 2], vertical_alignment="bottom")
 
     with columns[1]:
         in_subsets = []
         for subset in tomo_subsets:
             subset_tomos = read_subset(subset)
-            if tomo_name in subset_tomos:
+            if tomo_name in [_tomo_name_from_entry(t) for t in subset_tomos]:
                 in_subsets.append(subset)
 
         new_subsets = st.multiselect("Include in tomogram subsets", options=tomo_subsets, default=in_subsets, key=f'subset_select_{tomo_name}')
@@ -154,16 +175,27 @@ with column_base:
 
     st.text("")
 
-    features = df.loc[tomo_name].sort_values(ascending=False).index.tolist()
+    row_data = df.loc[tomo_name]
+    volume_features = [f for f in row_data.index if not f.startswith('particle_')]
+    particle_features = [f for f in row_data.index if f.startswith('particle_')]
+
+    volume_features = sorted(volume_features, key=lambda f: row_data[f], reverse=True)
 
     n_imgs_per_row = 5
-    while features != []:
-        n_cols = min(len(features), n_imgs_per_row)
-        col_features = features[:n_cols]
-        features = features[n_cols:]
+    while volume_features:
+        n_cols = min(len(volume_features), n_imgs_per_row)
+        col_features = volume_features[:n_cols]
+        volume_features = volume_features[n_cols:]
         for o, c in zip(col_features, st.columns(n_imgs_per_row)):
             with c:
-                volume_fraction = df.loc[tomo_name, o]
+                volume_fraction = row_data[o]
                 st.text(f"{o} ({volume_fraction:.1f}%)")
                 st.image(get_image(tomo_name, o).transpose(Image.FLIP_TOP_BOTTOM), width="stretch")
 
+    if particle_features:
+        st.text("")
+        st.markdown("**Particles**")
+        for f in particle_features:
+            count = int(row_data[f]) if not pd.isna(row_data[f]) else 0
+            label = f.removeprefix('particle_')
+            st.text(f"{label}: {count}")

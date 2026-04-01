@@ -1,2 +1,8 @@
 /dist/
 /build/
+__pycache__/
+*.egg-info/
+.idea/
+.claude/
+project_configuration.json
+render_configuration.json

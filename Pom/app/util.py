@@ -22,12 +22,14 @@ def get_image(tomo_name, feature):
     if feature == 'density':
         img_path = os.path.join('pom', 'images', 'density', f'{tomo_name}.png')
     else:
-        # Try composition first, then projection
         img_path = os.path.join('pom', 'images', feature, f'{tomo_name}.png')
         if not os.path.exists(img_path):
             img_path = os.path.join('pom', 'images', f'{feature}_projection', f'{tomo_name}.png')
 
     if os.path.exists(img_path):
-        return Image.open(img_path)
+        try:
+            return Image.open(img_path)
+        except Exception:
+            return _placeholder_image()
     else:
         return _placeholder_image()

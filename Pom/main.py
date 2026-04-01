@@ -29,6 +29,10 @@ def main():
     commands["summarize"] = subparsers.add_parser("summarize", help="Generate summary of all tomograms and segmentations.")
     commands["summarize"].add_argument('--overwrite', action='store_true', help='Overwrite existing entries')
     commands["summarize"].add_argument('--feature', required=False, help='Ignore all but this feature')
+    commands["summarize"].add_argument('--starfile', type=str, default=None, help='Path to a particle star file. Counts particles per tomogram and adds as a column to the summary.')
+    commands["summarize"].add_argument('--tomo-column', type=str, default=None, help='(--starfile only) Column name for tomogram identifier. Defaults to rlnMicrographName or wrpSourceName.')
+    commands["summarize"].add_argument('--column-name', type=str, default=None, help='(--starfile only) Name of the summary column. Defaults to star file basename.')
+    commands["summarize"].add_argument('--substitutions', type=str, nargs='*', default=None, help='(--starfile only) search:replace pairs for mapping star file tomogram names to .mrc filenames. For example, for an M star file, use .tomostar:_10.00Apx or something like that.')
 
     commands["projections"] = subparsers.add_parser("projections", help="Generate projection images for all tomograms and segmentations.")
 
@@ -36,14 +40,15 @@ def main():
 
     commands["browse"] = subparsers.add_parser("browse", help="Launch Streamlit app to browse tomograms and segmentations.")
 
-    commands["build"] = subparsers.add_parser("build", help='Build dataset summary and render all images.')
+    commands["auto"] = subparsers.add_parser("auto", help='Build dataset summary and render all images.')
 
     commands["contextualize"] = subparsers.add_parser('contextualize', help='Sample contextual information for particles in a star file and add to the star file as new columns.')
     commands["contextualize"].add_argument('--starfile', type=str, required=True, help='Path to the star file.')
-    commands["contextualize"].add_argument('--samplers', type=str, nargs='+', required=True, help='Feature:radius (in Angstrom) pairs to sample contexts. For example: mitochondrion:500 membrane:500.')
+    commands["contextualize"].add_argument('--samplers', type=str, nargs='+', required=True, help='One or multiple "samplers". Samplers are either: 1) a "feature:radius" pair, e.g. "mitochondrion:500", in which case you measure the average mitochondrion segmentation value in a radius-sized sphere, or 2) a "feature:threshold:dust" triplet, e.g. "mitochondrion:0.5:1e8", in which case you measure distance to nearest mitochondrion, thresholded at 0.5, ignoring volumes smaller than 1e8 cubic Angstrom. Radius in Angstrom. Threshold in range 0.0 - 1.0. Negative values for the dust parameter are interpreted as "discard all but the largest -N", for eg. N=-2.')
     commands["contextualize"].add_argument('--tomo-column', type=str, default=None, help='Column name for tomogram identifier. Defaults to rlnMicrographName or wrpSourceName.')
     commands["contextualize"].add_argument('--substitutions', type=str, nargs='*', default=None, help='search:replace pairs for mapping star file tomogram names to .mrc filenames. For example, for an M star file, use .tomostar:_10.00Apx or something like that.')
     commands["contextualize"].add_argument('--out_star', type=str, default=None, help='Path to output star file. If not provided, will overwrite input star file.')
+    commands["contextualize"].add_argument('--apix', type=float, default=None, help='Pixel size (in Angstrom) of the coordinate system in the star file.')
 
     args = parser.parse_args()
 
@@ -56,7 +61,13 @@ def main():
     elif args.command == 'list_sources':
         tools.list_sources()
     elif args.command == 'summarize':
-        tools.summarize(args.overwrite, args.feature)
+        if args.starfile:
+            if not os.path.exists(args.starfile):
+                print(f'Star file {args.starfile} not found.')
+                exit()
+            tools.summarize_star(args.starfile, tomo_col=args.tomo_column, column_name=args.column_name, substitutions=args.substitutions, overwrite=args.overwrite)
+        else:
+            tools.summarize(args.overwrite, args.feature)
     elif args.command == 'projections':
         tools.projections()
     elif args.command == 'render':
@@ -71,14 +82,11 @@ def main():
         app_path = os.path.join(os.path.dirname(__file__), 'app', 'Introduction.py')
         print(f'streamlit run {app_path} --server.headless=true')
         subprocess.run(['streamlit', 'run', app_path, '--server.headless=true'])
-    elif args.command == 'build':
+    elif args.command == 'auto':
         tools.summarize(overwrite=True)
         tools.projections()
-        tools.render(overwrite=True)
-        import subprocess
-        app_path = os.path.join(os.path.dirname(__file__), 'app', 'Introduction.py')
-        print(f'streamlit run {app_path} --server.headless=true')
-        subprocess.run(['streamlit', 'run', app_path, '--server.headless=true'])
+        tools.render()
+
 
 
 

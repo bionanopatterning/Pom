@@ -12,7 +12,7 @@ st.set_page_config(
 
 df = load_data()
 
-tomo_subsets = [os.path.splitext(os.path.basename(j))[0] for j in glob.glob(os.path.join("pom", "subsets", "*.txt"))]
+tomo_subsets = sorted([os.path.splitext(os.path.basename(j))[0] for j in glob.glob(os.path.join("pom", "subsets", "*.txt"))])
 
 # Load compositions
 compositions_path = os.path.join('pom', 'image_compositions.json')
@@ -69,7 +69,7 @@ with controls[2]:
 with controls[3]:
     st.selectbox(
         "Sort by",
-        ["None"] + list(df.columns),
+        ["None"] + sorted(list(df.columns)),
         key="sort_column",
         on_change=reset_page_number,
     )
@@ -110,7 +110,7 @@ if st.session_state.search_query:
 if st.session_state.subset != "all":
     subset_txt = os.path.join("pom", "subsets", f"{st.session_state.subset}.txt")
     with open(subset_txt, "r") as f:
-        subset_tomos = [line.strip() for line in f if line.strip()]
+        subset_tomos = {os.path.splitext(os.path.basename(line.strip()))[0] for line in f if line.strip()}
     tomogram_names = [name for name in tomogram_names if name in subset_tomos]
 
 # Apply sorting (NEW)
@@ -168,7 +168,7 @@ for idx in range(0, len(tomograms_page), n_cols):
             )
             # Image
             img = get_image(tomo_name, st.session_state.display_option)
-            if 'projection' in st.session_state.display_option:
+            if 'density' in st.session_state.display_option or 'projection' in st.session_state.display_option:
                 img = img.transpose(Image.FLIP_TOP_BOTTOM)
             st.image(img, width="stretch")
 

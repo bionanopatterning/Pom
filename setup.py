@@ -28,6 +28,8 @@ setup(
         "streamlit-aggrid",
         "starfile",
         "tqdm",
+        "mrcfile",
+        "scipy"
     ]
 )
 
