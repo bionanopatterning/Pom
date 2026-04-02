@@ -9,20 +9,20 @@ import pandas as pd
 from scipy import ndimage
 
 DEFAULT_COLOURS = {
-    "membrane": "#ff9999",
+    "membrane": "#4e4e4e",
     "ribosome": "#ffd700",
     "microtubule": "#00ffff",
     "impdh": "#ff00ff",
     "actin": "#1f77b4",
     "tric": "#ff0000",
-    "vault": "#e5ff6c",
-    "cytoplasmic_granule": "#c4c3d0",
-    "mitochondrial_granule": "#555555",
-    "vimentin": "#00ff00",
-    "prohibitin": "#ff8c00",
+    "vault": "#8100bd",
+    "cytoplasmic_granule": "#d1d1d1",
+    "mitochondrial_granule": "#0F0F0F",
+    "vimentin": "#21ac21",
+    "prohibitin": "#FFE5C5",
     "apoferritin": "#6fb8a8",
-    "npc": "#ffb000",
-    "nucleus": "#ff9900",
+    "npc": "#00ff0d",
+    "nucleus": "#fcff51",
     "cytoplasm": "#00ffff",
     "void": "#b0b8c1",
     "nuclear_envelope": "#0000ff",
@@ -374,7 +374,7 @@ def _process_projection(args):
     except:
         return False
 
-def projections():
+def projections(overwrite=False):
     workers = 32
     config = get_config()
 
@@ -384,14 +384,20 @@ def projections():
         for tomo_path in glob.glob(os.path.join(src, '*.mrc')):
             tomo_name = os.path.splitext(os.path.basename(tomo_path))[0]
             output_path = os.path.join('pom', 'images', 'density', f'{tomo_name}.png')
-            tasks.append((tomo_path, output_path, True))
+            if overwrite or not os.path.exists(output_path):
+                tasks.append((tomo_path, output_path, True))
 
     for src in config['segmentation_sources']:
         for seg_path in glob.glob(os.path.join(src, '*__*.mrc')):
             seg_filename = os.path.splitext(os.path.basename(seg_path))[0]
             tomo_name, feature_name = seg_filename.split('__', 1)
             output_path = os.path.join('pom', 'images', f'{feature_name}_projection', f'{tomo_name}.png')
-            tasks.append((seg_path, output_path, False))
+            if overwrite or not os.path.exists(output_path):
+                tasks.append((seg_path, output_path, False))
+
+    if not tasks:
+        print("All projections already exist. Use --overwrite to regenerate.")
+        return
 
     print(f"Projecting images for {len(tasks)} volumes with {workers} workers...")
 
@@ -478,7 +484,7 @@ def _render_worker(tomo_paths, df, config, feature_library, compositions, overwr
     except KeyboardInterrupt:
         pass
 
-def render(overwrite=True):
+def render(overwrite=False):
     import multiprocessing
     import itertools
     import time
@@ -505,7 +511,7 @@ def render(overwrite=True):
     for src in config['tomogram_sources']:
         tomograms.extend(glob.glob(os.path.join(src, '*.mrc')))
 
-    parallel_processes = min(os.cpu_count(), 64)
+    parallel_processes = min(os.cpu_count(), 16)
     print(f"Rendering {len(tomograms)} tomograms in {len(compositions)} {'composition' if len(compositions) == 1 else 'compositions'} with {parallel_processes} workers...")
 
     # Divide tomograms among processes

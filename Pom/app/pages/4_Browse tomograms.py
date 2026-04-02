@@ -199,3 +199,37 @@ with column_base:
             count = int(row_data[f]) if not pd.isna(row_data[f]) else 0
             label = f.removeprefix('particle_')
             st.text(f"{label}: {count}")
+
+    # --- Report to easymode ---
+    st.text("")
+    st.divider()
+    st.markdown("**Report to easymode**")
+    st.caption("Submit this tomogram to help improve easymode segmentation models.")
+
+    model_options = ["(none)"] + volume_features
+    report_model = st.selectbox("Model", model_options, key=f"report_model_{tomo_name}")
+    report_contact = st.text_input("Contact (optional)", key=f"report_contact_{tomo_name}", placeholder="e.g. your email")
+    report_comment = st.text_area("Comment", key=f"report_comment_{tomo_name}", placeholder="Describe the issue...")
+
+    if st.button("Submit report", type="primary", key=f"report_submit_{tomo_name}"):
+        if not file_found:
+            st.error("Tomogram file not found on disk.")
+        else:
+            import subprocess, shutil
+            if not shutil.which("easymode"):
+                st.error("easymode is not installed.")
+            else:
+                model_str = "" if report_model == "(none)" else report_model
+                cmd = ["easymode", "report", "--tomogram", tomo_file]
+                if model_str:
+                    cmd += ["--model", model_str]
+                if report_contact:
+                    cmd += ["--contact", report_contact]
+                if report_comment:
+                    cmd += ["--comment", report_comment]
+                with st.spinner("Uploading..."):
+                    result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode == 0:
+                    st.success("Report submitted successfully!")
+                else:
+                    st.error(f"Upload failed:\n{result.stderr or result.stdout}")

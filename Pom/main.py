@@ -35,8 +35,10 @@ def main():
     commands["summarize"].add_argument('--substitutions', type=str, nargs='*', default=None, help='(--starfile only) search:replace pairs for mapping star file tomogram names to .mrc filenames. For example, for an M star file, use .tomostar:_10.00Apx or something like that.')
 
     commands["projections"] = subparsers.add_parser("projections", help="Generate projection images for all tomograms and segmentations.")
+    commands["projections"].add_argument('--overwrite', action='store_true', help='Overwrite existing images')
 
     commands["render"] = subparsers.add_parser("render", help="Render isosurface images for tomogram compositions.")
+    commands["render"].add_argument('--overwrite', action='store_true', help='Overwrite existing images')
 
     commands["browse"] = subparsers.add_parser("browse", help="Launch Streamlit app to browse tomograms and segmentations.")
 
@@ -69,9 +71,9 @@ def main():
         else:
             tools.summarize(args.overwrite, args.feature)
     elif args.command == 'projections':
-        tools.projections()
+        tools.projections(args.overwrite)
     elif args.command == 'render':
-        tools.render()
+        tools.render(args.overwrite)
     elif args.command == 'contextualize':
         if not os.path.exists(args.starfile):
             print(f'Star file {args.starfile} not found.')
@@ -84,8 +86,8 @@ def main():
         subprocess.run(['streamlit', 'run', app_path, '--server.headless=true'])
     elif args.command == 'auto':
         tools.summarize(overwrite=True)
-        tools.projections()
-        tools.render()
+        tools.projections(overwrite=True)
+        tools.render(overwrite=True)
 
 
 
