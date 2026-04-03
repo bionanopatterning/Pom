@@ -177,9 +177,19 @@ def remove_source(tomogram_source=None, segmentation_source=None):
 
     save_config(config)
 
+def _is_placeholder(path, threshold_kb=10):
+    try:
+        return os.path.getsize(path) < threshold_kb * 1024
+    except OSError:
+        return True
+
+
 def _process_segmentation(args):
     seg_file, tomo_name, feature_name = args
     try:
+        if _is_placeholder(seg_file):
+            return None
+
         volume = mrcfile.mmap(seg_file).data
 
         if volume[0, 0, 0] == -1:
@@ -389,6 +399,8 @@ def projections(overwrite=False):
 
     for src in config['segmentation_sources']:
         for seg_path in glob.glob(os.path.join(src, '*__*.mrc')):
+            if _is_placeholder(seg_path):
+                continue
             seg_filename = os.path.splitext(os.path.basename(seg_path))[0]
             tomo_name, feature_name = seg_filename.split('__', 1)
             output_path = os.path.join('pom', 'images', f'{feature_name}_projection', f'{tomo_name}.png')
@@ -721,7 +733,7 @@ def contextualize_starfile(star_path, samplers, tomogram_name=None, substitution
         print(f'No column "{tomo_col}" found in {star_path}. Aborting.')
         return
 
-    parallel_processes = os.cpu_count()
+    parallel_processes = min([os.cpu_count(), 32])
     tomograms = df[tomo_col].unique()
     process_div = {p: [] for p in range(parallel_processes)}
     for p, tomogram in zip(itertools.cycle(range(parallel_processes)), tomograms):

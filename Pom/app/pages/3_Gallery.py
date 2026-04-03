@@ -110,7 +110,10 @@ if st.session_state.search_query:
 if st.session_state.subset != "all":
     subset_txt = os.path.join("pom", "subsets", f"{st.session_state.subset}.txt")
     with open(subset_txt, "r") as f:
-        subset_tomos = {os.path.splitext(os.path.basename(line.strip()))[0] for line in f if line.strip()}
+        def _tomo_name(entry):
+            base = entry.replace('\\', '/').rsplit('/', 1)[-1]
+            return base[:-4] if base.endswith('.mrc') else base
+        subset_tomos = {_tomo_name(line.strip()) for line in f if line.strip()}
     tomogram_names = [name for name in tomogram_names if name in subset_tomos]
 
 # Apply sorting (NEW)

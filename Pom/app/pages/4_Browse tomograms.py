@@ -17,16 +17,19 @@ os.makedirs(os.path.join("pom", "subsets"), exist_ok=True)
 
 def _tomo_name_from_entry(entry):
     """Return the bare tomogram name from a subset entry (full path or plain name)."""
-    return os.path.splitext(os.path.basename(entry))[0]
+    base = entry.replace('\\', '/').rsplit('/', 1)[-1]
+    if base.endswith('.mrc'):
+        return base[:-4]
+    return base
 
 def _migrate_subset_to_full_paths(subset_path, entries):
     # backwards compatibility (260331): rewrite plain tomo names to full paths on first read
-    needs_migration = any(os.sep not in e and '/' not in e for e in entries)
+    needs_migration = any('/' not in e and '\\' not in e for e in entries)
     if not needs_migration:
         return entries
     migrated = []
     for e in entries:
-        if os.sep not in e and '/' not in e:
+        if '/' not in e and '\\' not in e:
             migrated.append(get_tomogram_by_name(e) or e)
         else:
             migrated.append(e)
@@ -180,6 +183,7 @@ with column_base:
     particle_features = [f for f in row_data.index if f.startswith('particle_')]
 
     volume_features = sorted(volume_features, key=lambda f: row_data[f], reverse=True)
+    all_volume_features = list(volume_features)
 
     n_imgs_per_row = 5
     while volume_features:
@@ -203,33 +207,30 @@ with column_base:
     # --- Report to easymode ---
     st.text("")
     st.divider()
-    st.markdown("**Report to easymode**")
-    st.caption("Submit this tomogram to help improve easymode segmentation models.")
+    _, report_col = st.columns([3, 1])
+    with report_col:
+        with st.expander("Report to easymode"):
+            report_comment = st.text_input("Comment", key=f"report_comment_{tomo_name}", placeholder="Describe the issue...")
 
-    model_options = ["(none)"] + volume_features
-    report_model = st.selectbox("Model", model_options, key=f"report_model_{tomo_name}")
-    report_contact = st.text_input("Contact (optional)", key=f"report_contact_{tomo_name}", placeholder="e.g. your email")
-    report_comment = st.text_area("Comment", key=f"report_comment_{tomo_name}", placeholder="Describe the issue...")
-
-    if st.button("Submit report", type="primary", key=f"report_submit_{tomo_name}"):
-        if not file_found:
-            st.error("Tomogram file not found on disk.")
-        else:
-            import subprocess, shutil
-            if not shutil.which("easymode"):
-                st.error("easymode is not installed.")
-            else:
-                model_str = "" if report_model == "(none)" else report_model
-                cmd = ["easymode", "report", "--tomogram", tomo_file]
-                if model_str:
-                    cmd += ["--model", model_str]
-                if report_contact:
-                    cmd += ["--contact", report_contact]
-                if report_comment:
-                    cmd += ["--comment", report_comment]
-                with st.spinner("Uploading..."):
-                    result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode == 0:
-                    st.success("Report submitted successfully!")
+            if st.button("Submit", type="secondary", key=f"report_submit_{tomo_name}"):
+                if not file_found:
+                    st.error("Tomogram not found.")
                 else:
-                    st.error(f"Upload failed:\n{result.stderr or result.stdout}")
+                    import subprocess, shutil, sys, threading
+                    if not shutil.which("easymode"):
+                        st.error("easymode not installed.")
+                    else:
+                        cmd = ["easymode", "report", "--tomogram", tomo_file]
+                        if report_comment:
+                            cmd += ["--comment", report_comment]
+
+                        def _run_report():
+                            print(f"\n[Pom] Running: {' '.join(cmd)}", flush=True)
+                            result = subprocess.run(cmd, stdout=sys.stdout, stderr=sys.stderr)
+                            if result.returncode == 0:
+                                print(f"[Pom] Report submitted for {tomo_name}.", flush=True)
+                            else:
+                                print(f"[Pom] Report failed for {tomo_name} (exit code {result.returncode}).", flush=True)
+
+                        threading.Thread(target=_run_report, daemon=True).start()
+                        st.info("Uploading in background.")
