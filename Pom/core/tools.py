@@ -606,6 +606,16 @@ def _distance_to_surface(segmentation_volume, normalization_value, threshold, du
     return distances
 
 
+def _euler_to_primary_axis(tilt_deg, psi_deg):
+    tilt = np.radians(tilt_deg)
+    psi = np.radians(psi_deg)
+    return np.array([
+        np.cos(tilt),
+        np.sin(tilt) * np.sin(psi),
+        -np.sin(tilt) * np.cos(psi),
+    ])
+
+
 def _contextualize_job(df, samplers_parsed, tomogram_name, coords_angpix):
     tomogram_path = get_tomogram_by_name(tomogram_name)
     if tomogram_path is None:
@@ -632,6 +642,17 @@ def _contextualize_job(df, samplers_parsed, tomogram_name, coords_angpix):
 
     coordinates = np.stack([z, y, x], axis=1)
 
+    has_offset = any(s[0] == 'sphere' and s[3] != 0.0 for s in samplers_parsed)
+    axes = None
+    if has_offset:
+        if 'rlnAngleTilt' in df.columns and 'rlnAnglePsi' in df.columns:
+            axes = np.stack([
+                _euler_to_primary_axis(t, p)
+                for t, p in zip(df['rlnAngleTilt'].values, df['rlnAnglePsi'].values)
+            ])
+        else:
+            print(f'Warning: axis offset requested but rlnAngleTilt/rlnAnglePsi not found. Sampling at particle center.')
+
     def spherical_mask(radius, apix):
         _r = int(np.ceil(radius / apix))
         grid = np.arange(-_r, _r+1)
@@ -642,8 +663,12 @@ def _contextualize_job(df, samplers_parsed, tomogram_name, coords_angpix):
 
     for sampler in samplers_parsed:
         if sampler[0] == 'sphere':
-            _, feature, radius = sampler
-            column_name = f"pom{feature.replace('_', ' ').title().replace(' ', '')}{int(radius)}A"
+            _, feature, radius, offset = sampler
+            if offset != 0.0:
+                sign = 'p' if offset > 0 else 'm'
+                column_name = f"pom{feature.replace('_', ' ').title().replace(' ', '')}{int(radius)}A{sign}{int(round(abs(offset)))}"
+            else:
+                column_name = f"pom{feature.replace('_', ' ').title().replace(' ', '')}{int(radius)}A"
             segmentation_path = get_segmentation_for_tomogram(tomogram_name, feature)
             if segmentation_path is None:
                 df[column_name] = np.nan
@@ -654,8 +679,12 @@ def _contextualize_job(df, samplers_parsed, tomogram_name, coords_angpix):
             indices = spherical_mask(radius, apix)
 
             context_values = np.full(len(coordinates), np.nan, dtype=np.float32)
-            for j, (cj, ck, cl) in enumerate(coordinates):
-                c = np.array([cj, ck, cl]).round().astype(int)
+            for j, coord in enumerate(coordinates):
+                if offset != 0.0 and axes is not None:
+                    center = coord + axes[j] * (offset / apix)
+                else:
+                    center = coord
+                c = np.round(center).astype(int)
                 sample_indices = indices + c
                 within_bounds = np.all((sample_indices >= 0) & (sample_indices < segmentation_volume.shape), axis=1)
                 sample_indices = sample_indices[within_bounds]
@@ -697,7 +726,9 @@ def contextualize_starfile(star_path, samplers, tomogram_name=None, substitution
     for s in samplers:
         parts = s.split(':')
         if len(parts) == 2:
-            samplers_parsed.append(('sphere', parts[0], float(parts[1])))
+            samplers_parsed.append(('sphere', parts[0], float(parts[1]), 0.0))
+        elif len(parts) == 3 and (parts[2].startswith('+') or parts[2].startswith('-')):
+            samplers_parsed.append(('sphere', parts[0], float(parts[1]), float(parts[2])))
         elif len(parts) == 3:
             samplers_parsed.append(('distance', parts[0], float(parts[1]), float(parts[2])))
         else:
@@ -707,9 +738,13 @@ def contextualize_starfile(star_path, samplers, tomogram_name=None, substitution
     print(f'\nContextualizing {len(df)} particles with {len(samplers_parsed)} samplers:')
     for i, s in enumerate(samplers_parsed, 1):
         if s[0] == 'sphere':
-            _, feature, radius = s
+            _, feature, radius, offset = s
             col = f"pom{feature.replace('_', ' ').title().replace(' ', '')}{int(radius)}A"
-            print(f'\t{i}. {col}: average {feature} value within {radius:.0f} Å radius.')
+            if offset != 0.0:
+                sign = 'p' if offset > 0 else 'm'
+                col += f"{sign}{int(round(abs(offset)))}"
+            offset_str = f", offset {offset:+.0f} Å along primary axis" if offset != 0.0 else ""
+            print(f'\t{i}. {col}: average {feature} value within {radius:.0f} Å radius{offset_str}.')
         elif s[0] == 'distance':
             _, feature, threshold, dust = s
             col = f"pomDist{feature.replace('_', ' ').title().replace(' ', '')}T{int(threshold*100)}"
