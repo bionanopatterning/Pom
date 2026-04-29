@@ -727,7 +727,7 @@ def contextualize_starfile(star_path, samplers, tomogram_name=None, substitution
         parts = s.split(':')
         if len(parts) == 2:
             samplers_parsed.append(('sphere', parts[0], float(parts[1]), 0.0))
-        elif len(parts) == 3 and (parts[2].startswith('+') or parts[2].startswith('-')):
+        elif len(parts) == 3 and float(parts[1]) > 1.0 and (parts[2].startswith('+') or parts[2].startswith('-')):
             samplers_parsed.append(('sphere', parts[0], float(parts[1]), float(parts[2])))
         elif len(parts) == 3:
             samplers_parsed.append(('distance', parts[0], float(parts[1]), float(parts[2])))
