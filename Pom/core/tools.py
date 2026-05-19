@@ -220,6 +220,8 @@ def summarize(overwrite=True, target_feature=None):
     for src in config['tomogram_sources']:
         tomograms.extend(glob.glob(os.path.join(src, '*.mrc')))
 
+    print(f"Found {len(tomograms)} tomograms")
+
     if len(tomograms) == 0:
         print("No tomograms found.")
         return
@@ -251,6 +253,7 @@ def summarize(overwrite=True, target_feature=None):
                 df.loc[name] = np.nan
 
     tasks = []
+    feature_key = "*" if target_feature is None else f'{target_feature}'
     for tomo_path in tomograms:
         tomo_name = str(os.path.splitext(os.path.basename(tomo_path))[0])
 
