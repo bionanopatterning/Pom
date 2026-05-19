@@ -46,12 +46,16 @@ with st.expander(label="Filters"):
         with cols[col_idx]:  # Add slider in the appropriate column
             slider_filters[col] = st.slider(f"{col}", min_val, max_val, (min_val, max_val))
 
-    # Apply the filters to the DataFrame
+    # Apply the filters to the DataFrame.
+    # Keep NaN rows by default — only drop them when the user has actively raised
+    # the slider's lower bound above the column's minimum value (explicit filter intent).
     for col, (min_val, max_val) in slider_filters.items():
-        if min_val > 0.0:
-            filtered_df = filtered_df[(filtered_df[col] >= min_val) & (filtered_df[col] <= max_val)]
+        col_min = float(copy_df[col].min())
+        in_range = (filtered_df[col] >= min_val) & (filtered_df[col] <= max_val)
+        if min_val > col_min:
+            filtered_df = filtered_df[in_range]
         else:
-            filtered_df = filtered_df[(filtered_df[col].isna()) | ((filtered_df[col] >= min_val) & (filtered_df[col] <= max_val))]
+            filtered_df = filtered_df[in_range | filtered_df[col].isna()]
 
 # Create AgGrid options
 gb = GridOptionsBuilder.from_dataframe(filtered_df)

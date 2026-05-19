@@ -17,8 +17,8 @@ def main():
     commands["initialize"] = subparsers.add_parser("initialize", help="Initialize a new Pom project in the current directory.")
 
     commands["add_source"] = subparsers.add_parser("add_source", help="Add tomogram and/or segmentation source directories.")
-    commands["add_source"].add_argument('--tomograms', required=False, help='Path to tomogram directory')
-    commands["add_source"].add_argument('--segmentations', required=False, help='Path to segmentation directory')
+    commands["add_source"].add_argument('-t', '--tomograms', required=False, help='Path to tomogram directory')
+    commands["add_source"].add_argument('-s', '--segmentations', required=False, help='Path to segmentation directory')
 
     commands["list_sources"] = subparsers.add_parser('list_sources', help='List all configured source directories.')
 
@@ -51,6 +51,8 @@ def main():
     commands["contextualize"].add_argument('--substitutions', type=str, nargs='*', default=None, help='search:replace pairs for mapping star file tomogram names to .mrc filenames. For example, for an M star file, use .tomostar:_10.00Apx or something like that.')
     commands["contextualize"].add_argument('--out_star', type=str, default=None, help='Path to output star file. If not provided, will overwrite input star file.')
     commands["contextualize"].add_argument('--apix', type=float, default=None, help='Pixel size (in Angstrom) of the coordinate system in the star file.')
+    commands["contextualize"].add_argument('--binning', type=int, default=1, help='Bin segmentation volumes before computing distance maps (default 1). Higher values (2, 3, 4) speed up distance samplers with marginal accuracy loss.')
+    commands["contextualize"].add_argument('--workers', type=int, default=None, help='Number of parallel workers (default: min(cpu_count, 32)).')
 
     args = parser.parse_args()
 
@@ -78,16 +80,20 @@ def main():
         if not os.path.exists(args.starfile):
             print(f'Star file {args.starfile} not found.')
             exit()
-        tools.contextualize_starfile(args.starfile, args.samplers, tomogram_name=args.tomo_column, substitutions=args.substitutions, out_star=args.out_star)
+        tools.contextualize_starfile(args.starfile, args.samplers, tomogram_name=args.tomo_column, substitutions=args.substitutions, out_star=args.out_star, coords_angpix=args.apix, binning=args.binning, workers=args.workers)
     elif args.command == 'browse':
         import subprocess
         app_path = os.path.join(os.path.dirname(__file__), 'app', 'Introduction.py')
         print(f'streamlit run {app_path} --server.headless=true')
         subprocess.run(['streamlit', 'run', app_path, '--server.headless=true'])
     elif args.command == 'auto':
-        tools.summarize(overwrite=True)
-        tools.projections(overwrite=True)
-        tools.render(overwrite=True)
+        tools.summarize(overwrite=False)
+        tools.projections(overwrite=False)
+        tools.render(overwrite=False)
+        import subprocess
+        app_path = os.path.join(os.path.dirname(__file__), 'app', 'Introduction.py')
+        print(f'streamlit run {app_path} --server.headless=true')
+        subprocess.run(['streamlit', 'run', app_path, '--server.headless=true'])
 
 
 

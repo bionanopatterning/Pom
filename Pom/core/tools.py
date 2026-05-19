@@ -212,7 +212,7 @@ def _process_segmentation(args):
         return None
 
 def summarize(overwrite=True, target_feature=None):
-    workers = os.cpu_count()
+    workers = min([os.cpu_count(), 32])
     config = get_config()
     summary_path = os.path.join('pom', 'summary.star')
 
@@ -220,11 +220,20 @@ def summarize(overwrite=True, target_feature=None):
     for src in config['tomogram_sources']:
         tomograms.extend(glob.glob(os.path.join(src, '*.mrc')))
 
-    print(f"Found {len(tomograms)} tomograms")
-
     if len(tomograms) == 0:
-        print("No tomograms found")
+        print("No tomograms found.")
         return
+
+    # Count total segmentation volumes
+    feature_key = "*" if target_feature is None else f'{target_feature}'
+    total_segmentations = 0
+    for tomo_path in tomograms:
+        tomo_name = str(os.path.splitext(os.path.basename(tomo_path))[0])
+        for src in config['segmentation_sources']:
+            pattern = os.path.join(src, f'{tomo_name}__{feature_key}.mrc')
+            total_segmentations += len(glob.glob(pattern))
+
+    print(f"Found {len(tomograms)} tomograms, {total_segmentations} segmentation volumes.")
 
     if not os.path.exists(summary_path) or overwrite:
         tomo_names = [str(os.path.splitext(os.path.basename(t))[0]) for t in tomograms]
@@ -242,7 +251,6 @@ def summarize(overwrite=True, target_feature=None):
                 df.loc[name] = np.nan
 
     tasks = []
-    feature_key = "*" if target_feature is None else f'{target_feature}'
     for tomo_path in tomograms:
         tomo_name = str(os.path.splitext(os.path.basename(tomo_path))[0])
 
@@ -265,10 +273,13 @@ def summarize(overwrite=True, target_feature=None):
 
             tasks.append((seg_file, tomo_name, feature_name))
 
+    already = total_segmentations - len(tasks)
+    if already > 0:
+        print(f"{already} already summarized, {len(tasks)} new to measure.")
     print(f"Summarizing {len(tasks)} segmentations with {workers} workers...")
 
     with Pool(workers) as pool:
-        results = list(tqdm(pool.imap(_process_segmentation, tasks), total=len(tasks)))
+        results = list(tqdm(pool.imap_unordered(_process_segmentation, tasks), total=len(tasks)))
 
     for result in results:
         if result is not None:
@@ -414,7 +425,7 @@ def projections(overwrite=False):
     print(f"Projecting images for {len(tasks)} volumes with {workers} workers...")
 
     with Pool(workers) as pool:
-        results = list(tqdm(pool.imap(_process_projection, tasks), total=len(tasks)))
+        results = list(tqdm(pool.imap_unordered(_process_projection, tasks), total=len(tasks)))
 
 def _render_worker(tomo_paths, df, config, feature_library, compositions, overwrite, counter, lock):
     """Worker process that creates ONE renderer and processes all assigned tomograms."""
@@ -573,8 +584,25 @@ def render(overwrite=False):
             proc.join()
         print("Rendering cancelled.")
 
-def _distance_to_surface(segmentation_volume, normalization_value, threshold, dust_angstrom3, apix, coordinates):
-    binary = (segmentation_volume.astype(np.float32) / normalization_value) >= threshold
+def _bin_volume(vol, b):
+    """Bin a 3D volume by factor b using mean pooling. Trims edges to fit."""
+    if b <= 1:
+        return vol
+    d, h, w = vol.shape
+    d, h, w = (d // b) * b, (h // b) * b, (w // b) * b
+    return vol[:d, :h, :w].reshape(d // b, b, h // b, b, w // b, b).mean(axis=(1, 3, 5))
+
+
+def _distance_to_surface(segmentation_volume, normalization_value, threshold, dust_angstrom3, apix, coordinates, binning=1):
+    if binning > 1:
+        vol = _bin_volume(segmentation_volume.astype(np.float32), binning)
+        vol = vol / normalization_value
+        binned_apix = apix * binning
+    else:
+        vol = segmentation_volume.astype(np.float32) / normalization_value
+        binned_apix = apix
+
+    binary = vol >= threshold
 
     labeled, n_feat = ndimage.label(binary)
     sizes = ndimage.sum(binary, labeled, range(1, n_feat + 1))
@@ -586,7 +614,7 @@ def _distance_to_surface(segmentation_volume, normalization_value, threshold, du
                 if sz < threshold_size:
                     binary[labeled == (i + 1)] = False
     else:
-        min_voxels = int(np.ceil(dust_angstrom3 / (apix ** 3)))
+        min_voxels = int(np.ceil(dust_angstrom3 / (binned_apix ** 3)))
         for i, sz in enumerate(sizes):
             if sz < min_voxels:
                 binary[labeled == (i + 1)] = False
@@ -594,13 +622,13 @@ def _distance_to_surface(segmentation_volume, normalization_value, threshold, du
     if not binary.any():
         return np.full(len(coordinates), np.nan, dtype=np.float32)
 
-    edt_out = ndimage.distance_transform_edt(~binary) * apix
-    edt_in = ndimage.distance_transform_edt(binary) * apix
+    edt_out = ndimage.distance_transform_edt(~binary) * binned_apix
+    edt_in = ndimage.distance_transform_edt(binary) * binned_apix
     dist_vol = np.where(binary, -edt_in, edt_out)
 
     distances = np.full(len(coordinates), np.nan, dtype=np.float32)
     for j, (cj, ck, cl) in enumerate(coordinates):
-        c = np.round([cj, ck, cl]).astype(int)
+        c = np.round(np.array([cj, ck, cl]) / binning).astype(int) if binning > 1 else np.round([cj, ck, cl]).astype(int)
         if np.all((c >= 0) & (c < np.array(dist_vol.shape))):
             distances[j] = dist_vol[c[0], c[1], c[2]]
     return distances
@@ -616,7 +644,7 @@ def _euler_to_primary_axis(tilt_deg, psi_deg):
     ])
 
 
-def _contextualize_job(df, samplers_parsed, tomogram_name, coords_angpix):
+def _contextualize_job(df, samplers_parsed, tomogram_name, coords_angpix, binning=1):
     tomogram_path = get_tomogram_by_name(tomogram_name)
     if tomogram_path is None:
         print(f'Original tomogram (.mrc) for {tomogram_name} missing.')
@@ -642,7 +670,7 @@ def _contextualize_job(df, samplers_parsed, tomogram_name, coords_angpix):
 
     coordinates = np.stack([z, y, x], axis=1)
 
-    has_offset = any(s[0] == 'sphere' and s[3] != 0.0 for s in samplers_parsed)
+    has_offset = any((s[0] == 'sphere' and s[3] != 0.0) or (s[0] == 'distance' and s[4] != 0.0) for s in samplers_parsed)
     axes = None
     if has_offset:
         if 'rlnAngleTilt' in df.columns and 'rlnAnglePsi' in df.columns:
@@ -693,8 +721,11 @@ def _contextualize_job(df, samplers_parsed, tomogram_name, coords_angpix):
             df[column_name] = context_values
 
         elif sampler[0] == 'distance':
-            _, feature, threshold, dust = sampler
+            _, feature, threshold, dust, offset = sampler
             column_name = f"pomDist{feature.replace('_', ' ').title().replace(' ', '')}T{int(threshold*100)}"
+            if offset != 0.0:
+                sign = 'p' if offset > 0 else 'm'
+                column_name += f"{sign}{int(round(abs(offset)))}"
             segmentation_path = get_segmentation_for_tomogram(tomogram_name, feature)
             if segmentation_path is None:
                 df[column_name] = np.nan
@@ -702,35 +733,49 @@ def _contextualize_job(df, samplers_parsed, tomogram_name, coords_angpix):
 
             segmentation_volume = mrcfile.read(segmentation_path)
             normalization_value = 127 if segmentation_volume.dtype == np.int8 else 255 if segmentation_volume.dtype == np.uint16 else 1.0
-            df[column_name] = _distance_to_surface(segmentation_volume, normalization_value, threshold, dust, apix, coordinates)
+            if offset != 0.0 and axes is not None:
+                offset_coordinates = coordinates + axes * (offset / apix)
+            else:
+                offset_coordinates = coordinates
+            df[column_name] = _distance_to_surface(segmentation_volume, normalization_value, threshold, dust, apix, offset_coordinates, binning=binning)
 
     return df
 
 
-def _contextualize_worker(tomo_batch, samplers_parsed, df, tomo_col, coords_angpix, counter, lock):
+def _contextualize_worker(tomo_batch, samplers_parsed, df, tomo_col, coords_angpix, counter, lock, binning=1):
     results = {}
     for df_tomo_name, mrc_tomo_name in tomo_batch:
         df_subset = df[df[tomo_col] == df_tomo_name].copy()
-        results[df_tomo_name] = _contextualize_job(df_subset, samplers_parsed, mrc_tomo_name, coords_angpix)
+        results[df_tomo_name] = _contextualize_job(df_subset, samplers_parsed, mrc_tomo_name, coords_angpix, binning=binning)
         with lock:
             counter.value += 1
     return results
 
 
-def contextualize_starfile(star_path, samplers, tomogram_name=None, substitutions=None, out_star=None, coords_angpix=None):
+def contextualize_starfile(star_path, samplers, tomogram_name=None, substitutions=None, out_star=None, coords_angpix=None, binning=1, workers=None):
     import itertools, multiprocessing, time
-    df = starfile.read(star_path)
+    star_data = starfile.read(star_path)
+    if isinstance(star_data, dict):
+        df = star_data['particles']
+    else:
+        df = star_data
 
     print()
     samplers_parsed = []
     for s in samplers:
         parts = s.split(':')
         if len(parts) == 2:
+            # feature:radius -> sphere sampler
             samplers_parsed.append(('sphere', parts[0], float(parts[1]), 0.0))
-        elif len(parts) == 3 and (parts[2].startswith('+') or parts[2].startswith('-')):
-            samplers_parsed.append(('sphere', parts[0], float(parts[1]), float(parts[2])))
         elif len(parts) == 3:
-            samplers_parsed.append(('distance', parts[0], float(parts[1]), float(parts[2])))
+            # Disambiguate sphere (feature:radius:offset) vs distance (feature:threshold:dust)
+            # Sphere radius is large (>1), distance threshold is 0.0-1.0
+            if float(parts[1]) > 1.0:
+                samplers_parsed.append(('sphere', parts[0], float(parts[1]), float(parts[2])))
+            else:
+                samplers_parsed.append(('distance', parts[0], float(parts[1]), float(parts[2]), 0.0))
+        elif len(parts) == 4:
+            samplers_parsed.append(('distance', parts[0], float(parts[1]), float(parts[2]), float(parts[3])))
         else:
             print(f'Invalid sampler format: {s}')
             return
@@ -746,29 +791,53 @@ def contextualize_starfile(star_path, samplers, tomogram_name=None, substitution
             offset_str = f", offset {offset:+.0f} Å along primary axis" if offset != 0.0 else ""
             print(f'\t{i}. {col}: average {feature} value within {radius:.0f} Å radius{offset_str}.')
         elif s[0] == 'distance':
-            _, feature, threshold, dust = s
+            _, feature, threshold, dust, offset = s
             col = f"pomDist{feature.replace('_', ' ').title().replace(' ', '')}T{int(threshold*100)}"
+            if offset != 0.0:
+                sign = 'p' if offset > 0 else 'm'
+                col += f"{sign}{int(round(abs(offset)))}"
             if dust < 0:
                 dust_desc = f"keeping only {int(-dust)} largest blob(s)"
             else:
                 dust_desc = f"ignoring blobs < {dust:.2e} cubic Å"
-            print(f'\t{i}. {col}: distance to {feature} (threshold={threshold}, {dust_desc}).')
+            offset_str = f", offset {offset:+.0f} Å along primary axis" if offset != 0.0 else ""
+            print(f'\t{i}. {col}: distance to {feature} (threshold={threshold}, {dust_desc}{offset_str}).')
     print()
 
+    seg_sources = get_config().get('segmentation_sources', [])
+    if not seg_sources:
+        print(f'\033[33mNo segmentation sources configured. Run "pom add_source" first.\033[0m')
+        return
+
+    skip_features = set()
     for f in set(s[1] for s in samplers_parsed):
         n_feature_volumes = 0
-        for src in get_config()['segmentation_sources']:
+        for src in seg_sources:
             pattern = os.path.join(src, f'*__{f}.mrc')
             n_feature_volumes += len(glob.glob(pattern))
-        print(f'found {n_feature_volumes} volumes for feature "{f}".')
+        if n_feature_volumes == 0:
+            print(f'\033[33mNo segmentation volumes found for feature "{f}" — skipping this sampler.\033[0m')
+            skip_features.add(f)
+        else:
+            print(f'found {n_feature_volumes} volumes for feature "{f}".')
+    samplers_parsed = [s for s in samplers_parsed if s[1] not in skip_features]
+    if not samplers_parsed:
+        print(f'\033[33mNo valid samplers remaining. Aborting.\033[0m')
+        return
     print()
+
+    if out_star is not None:
+        out_dir = os.path.dirname(out_star)
+        if out_dir and not os.path.isdir(out_dir):
+            print(f'\033[33mOutput directory "{out_dir}" does not exist. Aborting.\033[0m')
+            return
 
     tomo_col = tomogram_name or ("rlnMicrographName" if "rlnMicrographName" in df.columns else "wrpSourceName")
     if tomo_col not in df.columns:
         print(f'No column "{tomo_col}" found in {star_path}. Aborting.')
         return
 
-    parallel_processes = min([os.cpu_count(), 32])
+    parallel_processes = workers if workers is not None else min(os.cpu_count(), 32)
     tomograms = df[tomo_col].unique()
     process_div = {p: [] for p in range(parallel_processes)}
     for p, tomogram in zip(itertools.cycle(range(parallel_processes)), tomograms):
@@ -785,7 +854,7 @@ def contextualize_starfile(star_path, samplers, tomogram_name=None, substitution
     print(f'sampling context for {len(tomograms)} tomograms with {parallel_processes} workers.')
     with multiprocessing.Pool(processes=parallel_processes) as pool:
         async_results = [pool.apply_async(_contextualize_worker,
-                                          (process_div[p], samplers_parsed, df, tomo_col, coords_angpix, counter, lock))
+                                          (process_div[p], samplers_parsed, df, tomo_col, coords_angpix, counter, lock, binning))
                          for p in range(parallel_processes)]
 
         with tqdm(total=len(tomograms)) as pbar:
@@ -805,9 +874,15 @@ def contextualize_starfile(star_path, samplers, tomogram_name=None, substitution
 
     output_df = pd.concat([df_result for batch_results in results for df_result in batch_results.values()], ignore_index=True)
 
+    if isinstance(star_data, dict):
+        star_data['particles'] = output_df
+        output_data = star_data
+    else:
+        output_data = output_df
+
     if out_star is None:
-        starfile.write(output_df, star_path)
+        starfile.write(output_data, star_path)
     else:
         if not '.star' in out_star:
             out_star += '.star'
-        starfile.write(output_df, out_star)
+        starfile.write(output_data, out_star)

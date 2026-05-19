@@ -83,19 +83,36 @@ else:
 if 'composition_display' not in st.session_state:
     st.session_state.composition_display = 'thumbnail' if 'thumbnail' in available_compositions else (available_compositions[0] if available_compositions else 'thumbnail')
 
+def _get_cmd_path():
+    ais_settings = os.path.join(os.path.expanduser("~"), ".Ais", "settings.txt")
+    cmd_dir = os.path.join(os.path.expanduser("~"), ".Ais")
+    if os.path.exists(ais_settings):
+        try:
+            import json as _json
+            with open(ais_settings) as f:
+                s = _json.load(f)
+            d = s.get("POM_COMMAND_DIR", "")
+            if d and os.path.isdir(d):
+                cmd_dir = d
+        except:
+            pass
+    return os.path.join(cmd_dir, "pom_to_ais.cmd")
+
 def open_in_ais(tomo_name):
     from Pom.core.tools import get_tomogram_by_name
-    cmd_path = os.path.join(os.path.expanduser("~"), ".Ais", "pom_to_ais.cmd")
+    cmd_path = _get_cmd_path()
     with open(cmd_path, 'a') as f:
         mrc_path = os.path.abspath(get_tomogram_by_name(tomo_name))
         aislink_path = mrc_path.replace('.mrc', '.aislink')
-        if os.path.exists(aislink_path):
-            mrc_path = f'Z:/compu_projects/easymode/volumes_cryocare/{open(aislink_path).read().strip()}'
-        scns_path = mrc_path.replace('.mrc', '.scns')
-        if os.path.exists(scns_path):
+        if os.path.exists(aislink_path):  # .aislink is used in easymode+Pom
+            scns_path = f'Z:/compu_projects/easymode/volumes_cryocare/{open(aislink_path).read().strip()}'.replace('.mrc', '.scns')
             f.write(f"open\t{scns_path}\n")
         else:
-            f.write(f"open\t{mrc_path}\n")
+            scns_path = mrc_path.replace('.mrc', '.scns')
+            if os.path.exists(scns_path):
+                f.write(f"open\t{scns_path}\n")
+            else:
+                f.write(f"open\t{mrc_path}\n")
 
 # Query params
 tomo_name = df.index[0]
