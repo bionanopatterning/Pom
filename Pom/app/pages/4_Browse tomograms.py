@@ -114,10 +114,16 @@ def open_in_ais(tomo_name):
             else:
                 f.write(f"open\t{mrc_path}\n")
 
-# Query params
+# Query params. Links must percent-encode the tomo name (quote/encodeURIComponent
+# on the linking pages) so '+' arrives as %2B; Streamlit's parse_qs then decodes it
+# back to a literal '+'. A bare '+' in the URL would otherwise decode to a space.
 tomo_name = df.index[0]
 if "tomo_id" in st.query_params:
-    tomo_name = st.query_params["tomo_id"]
+    requested = st.query_params["tomo_id"]
+    if requested in df.index:
+        tomo_name = requested
+    else:
+        st.warning(f"Tomogram '{requested}' not found — showing '{tomo_name}' instead.")
 
 
 tomo_subsets = sorted([os.path.splitext(os.path.basename(j))[0] for j in glob.glob(os.path.join("pom", "subsets", "*.txt"))])

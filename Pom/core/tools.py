@@ -9,24 +9,33 @@ import pandas as pd
 from scipy import ndimage
 
 DEFAULT_COLOURS = {
-    "membrane": "#4e4e4e",
+    "membrane": "#777777",
     "ribosome": "#ffd700",
-    "microtubule": "#00ffff",
-    "impdh": "#ff00ff",
+    "microtubule": "#ffae00",
+    "fhimpdh": "#ff00ff",
     "actin": "#1f77b4",
     "tric": "#ff0000",
     "vault": "#8100bd",
     "cytoplasmic_granule": "#d1d1d1",
     "mitochondrial_granule": "#0F0F0F",
-    "vimentin": "#21ac21",
-    "prohibitin": "#FFE5C5",
+    "mitochondrion": "#FF0000",
+    "intermediate_filament": "#21ac21",
+    "prohibitin": "#FDC5FF",
     "apoferritin": "#6fb8a8",
     "npc": "#00ff0d",
     "nucleus": "#fcff51",
     "cytoplasm": "#00ffff",
     "void": "#b0b8c1",
     "nuclear_envelope": "#0000ff",
+    "lipid_droplet": "#ffbd67"
 }
+
+# Features hidden by default (not rendered at all).
+DEFAULT_HIDDEN_FEATURES = {"void"}
+
+# Large context features that look better as volume clouds than as isosurfaces; visible by
+# default but rendered with the volume ray-tracer.
+DEFAULT_VOLUME_FEATURES = {"nucleus", "cytoplasm", "mitochondrion", "nuclear_envelope"}
 
 AIS_DEFAULT_COLOURS = [
     "#42d6a4",
@@ -60,14 +69,40 @@ def add_feature_to_library(feature):
         color = min(AIS_DEFAULT_COLOURS, key=lambda c: [f.get("color") for f in feature_library.values()].count(c))
 
     feature_library[feature] = {
-        'visible': False if feature == 'void' else True,
+        'visible': feature not in DEFAULT_HIDDEN_FEATURES,
         'color': color,
         'sigma': 0.0,
         'dust': 100000.0,
         'threshold': 0.5,
+        'render_as': 'volume' if feature in DEFAULT_VOLUME_FEATURES else 'isosurface',
     }
 
     save_feature_library(feature_library)
+
+# Resolution (px) at which compositions are rendered, for both static PNGs and spin GIFs.
+RENDER_IMAGE_SIZE = 512
+
+# Spin movie defaults (used when a composition has spin enabled).
+SPIN_FRAMES = 60
+SPIN_FPS = 10 / 3  # ~3.3 fps -> each frame shown ~300 ms; a slow ~18 s full rotation
+# For spin movies, bin isosurface segmentations so that their largest axis is at most this many
+# voxels. Triangle count (and per-frame draw cost) scales with surface area ~ axis^2, so capping
+# the largest axis bounds the worst-case mesh size regardless of tomogram aspect ratio.
+SPIN_SURFACE_MAX_AXIS = 256
+
+
+def composition_features(comp):
+    """Ordered feature/rank list of a composition, stored as either a plain list (legacy)
+    or a dict {'features': [...], 'spin': bool}."""
+    if isinstance(comp, dict):
+        return comp.get('features', [])
+    return comp
+
+
+def composition_spin(comp):
+    """Whether a composition should also be rendered as a 360-degree spin GIF."""
+    return bool(comp.get('spin', False)) if isinstance(comp, dict) else False
+
 
 def get_compositions(new=False):
     if not new:
@@ -79,7 +114,7 @@ def get_compositions(new=False):
                 return json.load(f)
     else:
         return {
-            'thumbnail': ['rank1', 'rank2', 'rank3']
+            'thumbnail': {'features': ['membrane', 'rank1', 'rank2', 'rank3', 'rank4', 'rank5'], 'spin': True}
         }
 
 def save_compositions(compositions):
@@ -430,13 +465,91 @@ def projections(overwrite=False):
     with Pool(workers) as pool:
         results = list(tqdm(pool.imap_unordered(_process_projection, tasks), total=len(tasks)))
 
+def _resolve_composition_features(comp_def, sorted_features, feature_library):
+    """Resolve a composition definition (feature names, 'rankN' placeholders, and '!exclude'
+    items) into an ordered list of concrete feature names to render."""
+    available_features = [f for f in sorted_features if f in feature_library and feature_library[f].get('visible', True)]
+    features_to_render = []
+    for item in comp_def:
+        if item.startswith('!'):
+            exclude_feature = item[1:]
+            if exclude_feature in available_features:
+                available_features.remove(exclude_feature)
+        elif item.startswith('rank'):
+            rank = int(item[4:]) - 1
+            if rank < len(available_features):
+                features_to_render.append(available_features[rank])
+        else:
+            features_to_render.append(item)
+    return features_to_render
+
+
+def _bin_surface_volume(data, bin_factor):
+    """Bin a segmentation volume for surface meshing. Normalizes dtype-specific scales to 0..1
+    so the binned float32 volume can be marching-cubes'd with the standard 0..1 threshold,
+    bypassing SurfaceModel's per-dtype level remapping (which doesn't fire on float32 input)."""
+    if data.dtype == np.int8:
+        data = data.astype(np.float32) / 127.0
+    elif data.dtype == np.uint16:
+        data = data.astype(np.float32) / 255.0
+    else:
+        data = data.astype(np.float32)
+    return _bin_volume(data, bin_factor).astype(np.float32)
+
+
+def _build_renderables(features_to_render, tomo_name, config, feature_library, surface_max_axis=None, skip_volumes=False):
+    """Load segmentations and build SurfaceModel/VolumeModel renderables for one tomogram.
+
+    surface_max_axis: if set, surface segmentations whose largest axis exceeds this are
+    mean-pooled by bin_factor = ceil(max(shape) / surface_max_axis) before marching cubes.
+    Cuts both build time (~bin^3 fewer voxels) and triangle count (~bin^2 fewer triangles),
+    scaled per-volume so small tomograms aren't over-binned.
+    skip_volumes skips VolumeModel construction (used when reusing already-built volumes).
+    """
+    from Pom.core.render import SurfaceModel, VolumeModel
+    renderables = []
+    for feature in features_to_render:
+        if feature not in feature_library:
+            continue
+
+        is_volume = feature_library[feature].get('render_as', 'isosurface') == 'volume'
+        if is_volume and skip_volumes:
+            continue
+
+        seg_path = None
+        for src in config['segmentation_sources']:
+            path = os.path.join(src, f'{tomo_name}__{feature}.mrc')
+            if os.path.exists(path):
+                seg_path = path
+                break
+
+        if not seg_path:
+            continue
+
+        with mrcfile.open(seg_path, permissive=True) as mrc:
+            volume = np.copy(mrc.data)
+            pixel_size = mrc.voxel_size.x
+
+        if is_volume:
+            renderables.append(VolumeModel(volume, feature_library[feature], pixel_size))
+        else:
+            bin_factor = 1
+            if surface_max_axis and max(volume.shape) > surface_max_axis:
+                bin_factor = int(np.ceil(max(volume.shape) / surface_max_axis))
+            if bin_factor > 1:
+                volume = _bin_surface_volume(volume, bin_factor)
+                pixel_size = pixel_size * bin_factor  # preserve world-space scale & dust units
+            renderables.append(SurfaceModel(volume, feature_library[feature], pixel_size))
+    return renderables
+
+
 def _render_worker(tomo_paths, df, config, feature_library, compositions, overwrite, counter, lock):
     """Worker process that creates ONE renderer and processes all assigned tomograms."""
-    from Pom.core.render import Renderer, SurfaceModel
+    from Pom.core.render import Renderer, VolumeModel
     from PIL import Image
 
     try:
-        renderer = Renderer(image_size=1024)
+        renderer = Renderer(image_size=RENDER_IMAGE_SIZE)
 
         for tomo_path in tomo_paths:
             tomo_name = os.path.splitext(os.path.basename(tomo_path))[0]
@@ -449,55 +562,37 @@ def _render_worker(tomo_paths, df, config, feature_library, compositions, overwr
             sorted_features = df.loc[tomo_name].sort_values(ascending=False).index.tolist()
 
             for comp_name, comp_def in compositions.items():
-                output_path = os.path.join('pom', 'images', comp_name, f'{tomo_name}.png')
+                do_spin = composition_spin(comp_def)
+                png_path = os.path.join('pom', 'images', comp_name, f'{tomo_name}.png')
+                gif_path = os.path.join('pom', 'images', comp_name, f'{tomo_name}.gif')
 
-                if not overwrite and os.path.exists(output_path):
+                required_outputs = [png_path] + ([gif_path] if do_spin else [])
+                if not overwrite and all(os.path.exists(p) for p in required_outputs):
                     continue
 
-                available_features = [f for f in sorted_features if f in feature_library and feature_library[f].get('visible', True)]
-
-                features_to_render = []
-
-                for item in comp_def:
-                    if item.startswith('!'):
-                        exclude_feature = item[1:]
-                        if exclude_feature in available_features:
-                            available_features.remove(exclude_feature)
-                    elif item.startswith('rank'):
-                        rank = int(item[4:]) - 1
-                        if rank < len(available_features):
-                            features_to_render.append(available_features[rank])
-                    else:
-                        features_to_render.append(item)
-
-                renderables = []
-                for feature in features_to_render:
-                    if feature not in feature_library:
-                        continue
-
-                    seg_path = None
-                    for src in config['segmentation_sources']:
-                        path = os.path.join(src, f'{tomo_name}__{feature}.mrc')
-                        if os.path.exists(path):
-                            seg_path = path
-                            break
-
-                    if not seg_path:
-                        continue
-
-                    with mrcfile.open(seg_path, permissive=True) as mrc:
-                        volume = np.copy(mrc.data)
-                        pixel_size = mrc.voxel_size.x
-
-                    renderable = SurfaceModel(volume, feature_library[feature], pixel_size)
-                    renderables.append(renderable)
+                features_to_render = _resolve_composition_features(composition_features(comp_def), sorted_features, feature_library)
+                renderables = _build_renderables(features_to_render, tomo_name, config, feature_library)
 
                 if renderables:
+                    os.makedirs(os.path.dirname(png_path), exist_ok=True)
+
+                    # static image
                     renderer.new_image()
                     renderer.render(renderables)
-                    image = renderer.get_image()
-                    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-                    Image.fromarray(image).save(output_path)
+                    Image.fromarray(renderer.get_image()).save(png_path)
+
+                    # 360-degree spin movie -- use coarser surface meshes (binned segmentations)
+                    # to cut the per-frame draw cost. Volume models are reused (their cached
+                    # 3D textures are still valid and uploads aren't repeated).
+                    if do_spin:
+                        spin_surfaces = _build_renderables(
+                            features_to_render, tomo_name, config, feature_library,
+                            surface_max_axis=SPIN_SURFACE_MAX_AXIS, skip_volumes=True,
+                        )
+                        spin_renderables = [r for r in renderables if isinstance(r, VolumeModel)] + spin_surfaces
+                        _render_spin_gif(renderer, spin_renderables, gif_path)
+                        for r in spin_surfaces:
+                            r.delete()
 
                     for r in renderables:
                         r.delete()
@@ -539,6 +634,12 @@ def render(overwrite=False):
 
     parallel_processes = min(os.cpu_count(), 16)
     print(f"Rendering {len(tomograms)} tomograms in {len(compositions)} {'composition' if len(compositions) == 1 else 'compositions'} with {parallel_processes} workers...")
+
+    spinning = [name for name, comp in compositions.items() if composition_spin(comp)]
+    if spinning:
+        comp_path = os.path.abspath(os.path.join('pom', 'image_compositions.json'))
+        print(f"  Note: {len(spinning)} composition(s) render a spin movie ({', '.join(spinning)}) - this is much slower.")
+        print(f"  If it is too slow, uncheck 'Spin (GIF)' in the Visualization settings tab of the Pom app, or edit {comp_path}.")
 
     # Divide tomograms among processes
     process_div = {p: [] for p in range(parallel_processes)}
@@ -586,6 +687,30 @@ def render(overwrite=False):
         for proc in processes:
             proc.join()
         print("Rendering cancelled.")
+
+def _render_spin_gif(renderer, renderables, output_path, frames=SPIN_FRAMES, fps=SPIN_FPS):
+    """Render a 360-degree spin movie (animated GIF) of already-built renderables.
+
+    The camera yaw sweeps a full turn over `frames` frames; the original yaw is restored
+    afterwards so subsequent static renders are unaffected.
+    """
+    from PIL import Image
+
+    base_yaw = renderer.camera.yaw
+    images = []
+    for i in range(frames):
+        renderer.camera.yaw = base_yaw + 360.0 * i / frames
+        renderer.camera.on_update()
+        renderer.new_image()
+        renderer.render(renderables)
+        images.append(Image.fromarray(renderer.get_image()))
+
+    renderer.camera.yaw = base_yaw
+    renderer.camera.on_update()
+
+    duration_ms = int(round(1000.0 / fps))
+    images[0].save(output_path, save_all=True, append_images=images[1:], duration=duration_ms, loop=0, disposal=2, optimize=True)
+
 
 def _bin_volume(vol, b):
     """Bin a 3D volume by factor b using mean pooling. Trims edges to fit."""

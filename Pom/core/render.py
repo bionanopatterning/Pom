@@ -91,63 +91,81 @@ class Renderer:
         glfw.terminate()
 
     def render(self, renderables_list):
-        # self.volume_fbo_active = False
         # render surface models first, volumes second.
         m_surfaces = [s for s in renderables_list if isinstance(s, SurfaceModel)]
         self.render_surface_models(m_surfaces)
 
-        # m_volumes = [v for v in renderables_list if isinstance(v, VolumeModel)]
-        # if not m_volumes:
-        #     return
-        #
-        # self.render_depth_masks(m_volumes[0].data.shape)
-        # # depth to start sampling at is now in fbo b
-        # # depth to stop sampling at is now in fbo a
-        #
-        # # ray trace the volumes one by one.
-        # self.volume_fbo.bind()
-        # glClearColor(0.0, 0.0, 0.0, 0.0)
-        # glClear(GL_COLOR_BUFFER_BIT)
-        #
-        # Z, X, Y = m_volumes[0].data.shape
-        # self.ray_trace_shader.bind()
-        # self.ray_trace_shader.uniformmat4("ipMat", self.camera.ipmat)
-        # self.ray_trace_shader.uniformmat4("ivMat", self.camera.ivmat)
-        # self.ray_trace_shader.uniformmat4("pMat", self.camera.pmat)
-        # self.ray_trace_shader.uniform1f("near", self.camera.clip_near)
-        # self.ray_trace_shader.uniform1f("far", self.camera.clip_far)
-        # self.ray_trace_shader.uniform2f("viewportSize", (self.image_size, self.image_size))
-        # self.ray_trace_shader.uniform1f("pixelSize", PIXEL_SCALE / m_volumes[0].data.shape[1])
-        # self.ray_trace_shader.uniform1i("Z", Z)
-        # self.ray_trace_shader.uniform1i("Y", Y)
-        # self.ray_trace_shader.uniform1i("X", X)
-        # glActiveTexture(GL_TEXTURE0 + 1)
-        # glBindTexture(GL_TEXTURE_2D, self.depth_fbo_b.depth_texture_renderer_id)
-        # glActiveTexture(GL_TEXTURE0 + 2)
-        # glBindTexture(GL_TEXTURE_2D, self.depth_fbo_a.depth_texture_renderer_id)
-        # glBindImageTexture(3, self.volume_fbo.texture.renderer_id, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F)
-        #
-        # for v in m_volumes:
-        #     glActiveTexture(GL_TEXTURE0)
-        #     glBindTexture(GL_TEXTURE_3D, self.texture3d)
-        #     glTexImage3D(GL_TEXTURE_3D, 0, GL_RED, v.data.shape[1], v.data.shape[2], v.data.shape[0], 0, GL_RED, GL_FLOAT, v.data.flatten())
-        #     self.ray_trace_shader.uniform3f("C", v.colour)
-        #     glDispatchCompute(self.image_size // 32, self.image_size // 32, 1)
-        #     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
-        #     glFinish()
-        # self.volume_fbo_active = True
-        # glEnable(GL_BLEND)
-        # glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-        #
-        # self.scene_fbo.bind()
-        # glActiveTexture(GL_TEXTURE0)
-        # glBindTexture(GL_TEXTURE_2D, self.volume_fbo.texture.renderer_id)
-        # self.ndc_img_shader.bind()
-        # self.ndc_screen_va.bind()
-        # glDrawElements(GL_TRIANGLES, self.ndc_screen_va.indexBuffer.getCount(), GL_UNSIGNED_SHORT, None)
-        # self.ndc_screen_va.unbind()
-        # self.ndc_img_shader.unbind()
-        # # combine the isosurface image and the volume images
+        m_volumes = [v for v in renderables_list if isinstance(v, VolumeModel)]
+        if not m_volumes:
+            return
+
+        self.render_depth_masks(m_volumes[0].data.shape)
+        # depth to start sampling at is now in fbo b
+        # depth to stop sampling at is now in fbo a
+
+        # ray trace the volumes one by one.
+        self.volume_fbo.bind()
+        glClearColor(0.0, 0.0, 0.0, 0.0)
+        glClear(GL_COLOR_BUFFER_BIT)
+
+        Z, X, Y = m_volumes[0].data.shape
+        self.ray_trace_shader.bind()
+        self.ray_trace_shader.uniformmat4("ipMat", self.camera.ipmat)
+        self.ray_trace_shader.uniformmat4("ivMat", self.camera.ivmat)
+        self.ray_trace_shader.uniformmat4("pMat", self.camera.pmat)
+        self.ray_trace_shader.uniform1f("near", self.camera.clip_near)
+        self.ray_trace_shader.uniform1f("far", self.camera.clip_far)
+        self.ray_trace_shader.uniform2f("viewportSize", (self.image_size, self.image_size))
+        self.ray_trace_shader.uniform1f("pixelSize", PIXEL_SCALE / m_volumes[0].data.shape[1])
+        self.ray_trace_shader.uniform1i("Z", Z)
+        self.ray_trace_shader.uniform1i("Y", Y)
+        self.ray_trace_shader.uniform1i("X", X)
+        glActiveTexture(GL_TEXTURE0 + 1)
+        glBindTexture(GL_TEXTURE_2D, self.depth_fbo_b.depth_texture_renderer_id)
+        glActiveTexture(GL_TEXTURE0 + 2)
+        glBindTexture(GL_TEXTURE_2D, self.depth_fbo_a.depth_texture_renderer_id)
+        glBindImageTexture(3, self.volume_fbo.texture.renderer_id, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F)
+
+        for v in m_volumes:
+            glActiveTexture(GL_TEXTURE0)
+            # Upload each volume's 3D texture once and cache it on the model. render() is called
+            # once per frame, so re-uploading here (flatten + glTexImage3D) every call made spin
+            # movies pay the full volume transfer cost per frame - by far the dominant cost.
+            if getattr(v, 'gl_texture', None) is None:
+                v.gl_texture = glGenTextures(1)
+                glBindTexture(GL_TEXTURE_3D, v.gl_texture)
+                glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+                glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+                glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE)
+                glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+                glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+                glTexImage3D(GL_TEXTURE_3D, 0, GL_RED, v.data.shape[1], v.data.shape[2], v.data.shape[0], 0, GL_RED, GL_FLOAT, v.data.flatten())
+            else:
+                glBindTexture(GL_TEXTURE_3D, v.gl_texture)
+            self.ray_trace_shader.uniform3f("C", v.colour)
+            glDispatchCompute(self.image_size // 32, self.image_size // 32, 1)
+            # order this volume's imageStore before the next volume's imageLoad (accumulation)
+            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
+
+        # The volume_fbo colour texture was written with imageStore. Below it is read with
+        # texture() in the ndc pass. GL_SHADER_IMAGE_ACCESS_BARRIER_BIT only makes the writes
+        # visible to subsequent image load/store, NOT to texture fetches, so without the fetch
+        # barrier the sampler reads stale, tile-shaped (square) garbage from incoherent caches.
+        glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT)
+        self.volume_fbo_active = True
+
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+
+        # combine the isosurface image and the volume images
+        self.scene_fbo.bind()
+        glActiveTexture(GL_TEXTURE0)
+        glBindTexture(GL_TEXTURE_2D, self.volume_fbo.texture.renderer_id)
+        self.ndc_img_shader.bind()
+        self.ndc_screen_va.bind()
+        glDrawElements(GL_TRIANGLES, self.ndc_screen_va.indexBuffer.getCount(), GL_UNSIGNED_SHORT, None)
+        self.ndc_screen_va.unbind()
+        self.ndc_img_shader.unbind()
 
     def render_surface_models(self, surface_models):
         glEnable(GL_BLEND)
@@ -286,22 +304,34 @@ class Renderer:
         return image
 
 
-# class VolumeModel:
-#     def __init__(self, data, feature_definition, pixel_size):
-#         self.data = data
-#         self.data = gaussian_filter1d(data, sigma=3.0, axis=0)
-#         self.data[0, :, :] = 0
-#         self.data[:, 0, :] = 0
-#         self.data[:, :, 0] = 0
-#         self.data[-1, :, :] = 0
-#         self.data[:, -1, :] = 0
-#         self.data[:, :, -1] = 0
-#         self.title = feature_definition.title
-#         self.colour = feature_definition.colour
-#         self.pixel_size = pixel_size
-#
-#     def delete(self):
-#         pass
+class VolumeModel:
+    def __init__(self, data, feature_definition, pixel_size):
+        self.data = gaussian_filter(data.astype(np.float32), sigma=feature_definition['sigma'] / max(1.0, pixel_size))
+
+        # normalize to roughly 0..1 so the ray-trace shader's fixed thresholds apply (mirrors SurfaceModel)
+        if data.dtype == np.int8:
+            self.data /= 127.0
+        elif data.dtype == np.uint16:
+            self.data /= 255.0
+        elif data.dtype == np.float32:
+            self.data[self.data == 2] = 0  # easymode 3D data hack, see SurfaceModel
+
+        self.data[0, :, :] = 0
+        self.data[-1, :, :] = 0
+        self.data[:, 0, :] = 0
+        self.data[:, -1, :] = 0
+        self.data[:, :, 0] = 0
+        self.data[:, :, -1] = 0
+
+        self.colour = SurfaceModel.hex_to_rgb(feature_definition['color'])
+        self.pixel_size = pixel_size
+        self.alpha = 1.0
+        self.gl_texture = None  # 3D texture, uploaded lazily and cached on first render
+
+    def delete(self):
+        if self.gl_texture is not None:
+            glDeleteTextures(1, [self.gl_texture])
+            self.gl_texture = None
 
 
 class SurfaceModel:

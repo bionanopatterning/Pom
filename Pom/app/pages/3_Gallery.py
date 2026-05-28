@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import glob
 import json
+from urllib.parse import quote
 from Pom.app.util import load_data, get_image
 from PIL import Image
 
@@ -165,7 +166,7 @@ for idx in range(0, len(tomograms_page), n_cols):
             # Clickable tomogram name
             st.markdown(
                 f"<div style='text-align: center; font-size:14px; margin-top:5px;'>"
-                f"<a href='/Browse_tomograms?tomo_id={tomo_name}' style='text-decoration: none; color: inherit;'>"
+                f"<a href='/Browse_tomograms?tomo_id={quote(tomo_name, safe='')}' style='text-decoration: none; color: inherit;'>"
                 f"{tomo_name}</a></div>",
                 unsafe_allow_html=True,
             )

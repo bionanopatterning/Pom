@@ -1,5 +1,6 @@
 import streamlit as st
 import matplotlib.pyplot as plt
+from urllib.parse import quote
 from Pom.app.util import *
 from Pom.core.tools import get_feature_library
 import numpy as np
@@ -34,14 +35,14 @@ def feature_summary(df, feature):
         img_high = get_image(tomo_high, "density")
         if img_high:
             st.image(img_high, width="stretch")
-        high_link = f"/Browse_tomograms?tomo_id={tomo_high}"
+        high_link = f"/Browse_tomograms?tomo_id={quote(tomo_high, safe='')}"
         st.markdown(f"[{tomo_high}]({high_link})")
     with c2:
         st.markdown(f"**Low {feature} content:**")
         img_low = get_image(tomo_low, "density")
         if img_low:
             st.image(img_low, width="stretch")
-        low_link = f"/Browse_tomograms?tomo_id={tomo_low}"
+        low_link = f"/Browse_tomograms?tomo_id={quote(tomo_low, safe='')}"
         st.markdown(f"[{tomo_low}]({low_link})")
 
 c1, c2, c3 = st.columns([0.2, 0.6, 0.2])

@@ -68,7 +68,7 @@ gb.configure_column('Tomogram', header_name="Tomogram", pinned=True,
                           init(params) {
                             this.eGui = document.createElement('a');
                             this.eGui.innerText = params.value;
-                            this.eGui.setAttribute('href', '/Browse_tomograms?tomo_id=' + params.value);
+                            this.eGui.setAttribute('href', '/Browse_tomograms?tomo_id=' + encodeURIComponent(params.value));
                             this.eGui.setAttribute('style', "text-decoration:none");
                             this.eGui.setAttribute('target', "_blank");
                           }

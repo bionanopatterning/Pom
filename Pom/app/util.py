@@ -22,6 +22,11 @@ def get_image(tomo_name, feature):
     if feature == 'density':
         img_path = os.path.join('pom', 'images', 'density', f'{tomo_name}.png')
     else:
+        # A spin composition writes an animated GIF alongside the PNG; prefer it and
+        # return the path (st.image animates a file path/bytes, but not a PIL Image).
+        gif_path = os.path.join('pom', 'images', feature, f'{tomo_name}.gif')
+        if os.path.exists(gif_path):
+            return gif_path
         img_path = os.path.join('pom', 'images', feature, f'{tomo_name}.png')
         if not os.path.exists(img_path):
             img_path = os.path.join('pom', 'images', f'{feature}_projection', f'{tomo_name}.png')
