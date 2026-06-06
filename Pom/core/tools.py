@@ -79,12 +79,15 @@ def add_feature_to_library(feature):
 
     save_feature_library(feature_library)
 
-# Resolution (px) at which compositions are rendered, for both static PNGs and spin GIFs.
-RENDER_IMAGE_SIZE = 512
+# Render resolutions (px) for static PNG vs spin GIF. PNGs render full-size for the
+# detail page / gallery; spin GIFs render smaller since they're shown smaller and need
+# to encode 180 frames cheaply.
+RENDER_IMAGE_SIZE = 1024
+SPIN_RENDER_SIZE = 512
 
 # Spin movie defaults (used when a composition has spin enabled).
-SPIN_FRAMES = 60
-SPIN_FPS = 10 / 3  # ~3.3 fps -> each frame shown ~300 ms; a slow ~18 s full rotation
+SPIN_FRAMES = 180
+SPIN_FPS = 10  # ~100 ms per frame, ~18 s full rotation (3x smoother than 60 frames @ 3.3 fps)
 # For spin movies, bin isosurface segmentations so that their largest axis is at most this many
 # voxels. Triangle count (and per-frame draw cost) scales with surface area ~ axis^2, so capping
 # the largest axis bounds the worst-case mesh size regardless of tomogram aspect ratio.
@@ -114,7 +117,10 @@ def get_compositions(new=False):
                 return json.load(f)
     else:
         return {
-            'thumbnail': {'features': ['membrane', 'rank1', 'rank2', 'rank3', 'rank4', 'rank5'], 'spin': True}
+            'thumbnail': {
+                'features': ['membrane', 'ribosome', 'microtubule', 'cytoplasmic_granule', 'cytoplasm', 'mitochondrion'],
+                'spin': False,
+            }
         }
 
 def save_compositions(compositions):
@@ -147,8 +153,33 @@ def initialize():
     os.makedirs(os.path.join('pom', 'images'), exist_ok=True)
     os.makedirs(os.path.join('pom', 'subsets'), exist_ok=True)
 
-    save_config(get_config(new=True))
+    config = get_config(new=True)
+
+    # Auto-detect a tomogram source: prefer 'denoised/', otherwise fall back to common
+    # Warp layouts. First hit wins.
+    tomo_candidates = [
+        'denoised',
+        os.path.join('warp_tiltseries', 'reconstruction', 'denoised'),
+        os.path.join('warp_tiltseries', 'reconstruction'),
+    ]
+    for cand in tomo_candidates:
+        if os.path.isdir(cand):
+            config['tomogram_sources'].append(cand)
+            print(f"  Auto-detected tomogram source: {cand}")
+            break
+    else:
+        print("  No tomogram source auto-detected. Add one with 'pom add_source -t <path>'.")
+
+    if os.path.isdir('segmented'):
+        config['segmentation_sources'].append('segmented')
+        print("  Auto-detected segmentation source: segmented")
+    else:
+        print("  No segmentation source auto-detected. Add one with 'pom add_source -s <path>'.")
+
+    save_config(config)
     save_compositions(get_compositions(new=True))
+
+    list_sources()
 
 def get_tomogram_by_name(tomo):
     config = get_config()
@@ -173,15 +204,28 @@ def get_segmentation_for_tomogram(tomo, feature):
     return None
 
 def list_sources():
+    """Print all configured sources with a unified 1-based index spanning tomograms
+    first then segmentations. The index is what `pom remove_source N` consumes."""
     config = get_config()
 
+    n = 1
     print("\nTomogram sources:")
+    if not config['tomogram_sources']:
+        print("  (none)")
     for src in config['tomogram_sources']:
-        print(f"\t{src} - {len(glob.glob(os.path.join(src, '*.mrc')))} .mrc files")
+        n_mrc = len(glob.glob(os.path.join(src, '*.mrc')))
+        print(f"  {n}. {src} - {n_mrc} .mrc files")
+        n += 1
 
     print("\nSegmentation sources:")
+    if not config['segmentation_sources']:
+        print("  (none)")
     for src in config['segmentation_sources']:
-        print(f"\t{src} - {len(glob.glob(os.path.join(src, '*.mrc')))} .mrc files")
+        n_mrc = len(glob.glob(os.path.join(src, '*.mrc')))
+        print(f"  {n}. {src} - {n_mrc} .mrc files")
+        n += 1
+    print()
+
 
 def add_source(tomogram_source=None, segmentation_source=None):
     config = get_config()
@@ -192,6 +236,9 @@ def add_source(tomogram_source=None, segmentation_source=None):
             exit()
         if tomogram_source not in config['tomogram_sources']:
             config['tomogram_sources'].append(tomogram_source)
+            print(f"Added tomogram source: {tomogram_source}")
+        else:
+            print(f"Tomogram source already configured: {tomogram_source}")
 
     if segmentation_source:
         if not os.path.exists(segmentation_source):
@@ -199,18 +246,45 @@ def add_source(tomogram_source=None, segmentation_source=None):
             exit()
         if segmentation_source not in config['segmentation_sources']:
             config['segmentation_sources'].append(segmentation_source)
+            print(f"Added segmentation source: {segmentation_source}")
+        else:
+            print(f"Segmentation source already configured: {segmentation_source}")
 
     save_config(config)
+    list_sources()
 
-def remove_source(tomogram_source=None, segmentation_source=None):
+
+def remove_source(tomogram_source=None, segmentation_source=None, index=None):
+    """Remove a source by path (--tomograms / --segmentations) or by 1-based index
+    matching what `list_sources` prints (tomograms numbered first, then segmentations)."""
     config = get_config()
 
-    if tomogram_source in config['tomogram_sources']:
-        config['tomogram_sources'].remove(tomogram_source)
-    if segmentation_source in config['segmentation_sources']:
-        config['segmentation_sources'].remove(segmentation_source)
+    if index is not None:
+        n_tomo = len(config['tomogram_sources'])
+        n_seg = len(config['segmentation_sources'])
+        total = n_tomo + n_seg
+        if total == 0:
+            print("No sources configured.")
+            return
+        if index < 1 or index > total:
+            print(f"Index {index} out of range. Valid range is 1..{total}.")
+            return
+        if index <= n_tomo:
+            removed = config['tomogram_sources'].pop(index - 1)
+            print(f"Removed tomogram source: {removed}")
+        else:
+            removed = config['segmentation_sources'].pop(index - n_tomo - 1)
+            print(f"Removed segmentation source: {removed}")
+    else:
+        if tomogram_source and tomogram_source in config['tomogram_sources']:
+            config['tomogram_sources'].remove(tomogram_source)
+            print(f"Removed tomogram source: {tomogram_source}")
+        if segmentation_source and segmentation_source in config['segmentation_sources']:
+            config['segmentation_sources'].remove(segmentation_source)
+            print(f"Removed segmentation source: {segmentation_source}")
 
     save_config(config)
+    list_sources()
 
 def _is_placeholder(path, threshold_kb=10):
     try:
@@ -576,15 +650,17 @@ def _render_worker(tomo_paths, df, config, feature_library, compositions, overwr
                 if renderables:
                     os.makedirs(os.path.dirname(png_path), exist_ok=True)
 
-                    # static image
+                    # static image - render at full PNG resolution
+                    renderer.set_image_size(RENDER_IMAGE_SIZE)
                     renderer.new_image()
                     renderer.render(renderables)
                     Image.fromarray(renderer.get_image()).save(png_path)
 
-                    # 360-degree spin movie -- use coarser surface meshes (binned segmentations)
-                    # to cut the per-frame draw cost. Volume models are reused (their cached
-                    # 3D textures are still valid and uploads aren't repeated).
+                    # 360-degree spin movie at the smaller spin resolution. Uses coarser
+                    # surface meshes (binned segmentations) to cut per-frame draw cost.
+                    # Volume models are reused (their cached 3D textures stay valid).
                     if do_spin:
+                        renderer.set_image_size(SPIN_RENDER_SIZE)
                         spin_surfaces = _build_renderables(
                             features_to_render, tomo_name, config, feature_library,
                             surface_max_axis=SPIN_SURFACE_MAX_AXIS, skip_volumes=True,
@@ -617,6 +693,10 @@ def render(overwrite=False):
     summary_path = os.path.join('pom', 'summary.star')
     if not os.path.exists(summary_path):
         print("No summary found. Run 'pom summarize' first.")
+        return
+
+    if not config.get('segmentation_sources'):
+        print("no segmentation source found - skipping rendering.")
         return
 
     df = starfile.read(os.path.join('pom', 'summary.star'), parse_as_string=["tomogram"])

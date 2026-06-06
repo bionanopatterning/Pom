@@ -90,6 +90,26 @@ class Renderer:
     def delete(self):
         glfw.terminate()
 
+    def set_image_size(self, size):
+        """Resize the render target FBOs to a square `size`x`size`. The renderables
+        (SurfaceModel VAOs, VolumeModel textures, shaders) are untouched - they live in
+        the same GL context. Camera projection is re-emitted to match the new aspect
+        (still square, but kept consistent)."""
+        if size == self.image_size:
+            return
+        for fbo in (self.scene_fbo, self.scene_fbo_b, self.depth_fbo_a, self.depth_fbo_b, self.volume_fbo):
+            glDeleteTextures(1, [fbo.texture.renderer_id])
+            glDeleteTextures(1, [fbo.depth_texture_renderer_id])
+            glDeleteFramebuffers(1, [fbo.framebufferObject])
+        self.image_size = size
+        self.scene_fbo = FrameBuffer(width=size, height=size, texture_format="rgba32f")
+        self.scene_fbo_b = FrameBuffer(width=size, height=size, texture_format="rgba32f")
+        self.depth_fbo_a = FrameBuffer(width=size, height=size, texture_format="rgba32f")
+        self.depth_fbo_b = FrameBuffer(width=size, height=size, texture_format="rgba32f")
+        self.volume_fbo = FrameBuffer(width=size, height=size, texture_format="rgba32f")
+        self.camera.set_projection_matrix(size, size)
+        self.camera.on_update()
+
     def render(self, renderables_list):
         # render surface models first, volumes second.
         m_surfaces = [s for s in renderables_list if isinstance(s, SurfaceModel)]
@@ -144,18 +164,14 @@ class Renderer:
                 glBindTexture(GL_TEXTURE_3D, v.gl_texture)
             self.ray_trace_shader.uniform3f("C", v.colour)
             glDispatchCompute(self.image_size // 32, self.image_size // 32, 1)
-            # order this volume's imageStore before the next volume's imageLoad (accumulation)
             glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
 
-        # The volume_fbo colour texture was written with imageStore. Below it is read with
-        # texture() in the ndc pass. GL_SHADER_IMAGE_ACCESS_BARRIER_BIT only makes the writes
-        # visible to subsequent image load/store, NOT to texture fetches, so without the fetch
-        # barrier the sampler reads stale, tile-shaped (square) garbage from incoherent caches.
+
         glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT)
         self.volume_fbo_active = True
 
         glEnable(GL_BLEND)
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
 
         # combine the isosurface image and the volume images
         self.scene_fbo.bind()
@@ -487,7 +503,7 @@ class Light3D:
     def __init__(self):
         self.colour = (1.0, 1.0, 1.0)
         self.vec = (0.0, 1.0, 0.0)
-        self.yaw = 20.0
+        self.yaw = 0.0
         self.pitch = 0.0
         self.strength = 0.8
 
@@ -508,7 +524,7 @@ class Camera3D:
         self.projection_matrix = np.eye(4)
         self.view_projection_matrix = np.eye(4)
         self.focus = np.zeros(3)
-        self.pitch = -30.0
+        self.pitch = -15.0
         self.yaw = 180.0
         self.distance = 1120.0
         self.clip_near = 1e2

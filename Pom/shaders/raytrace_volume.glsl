@@ -77,12 +77,10 @@ void main()
             float lim_low = 0.3f;
             rayValue += clamp(voxelValue - lim_low, 0.0f, 1.0f) * (1.0f / (1.0f - lim_low));
         }
-        // Write to texture.
-        rayValue = rayValue / 200.0;
+        rayValue = rayValue / 400.0;
         rayValue = clamp(rayValue, 0.0, 1.0);
         vec3 rayColour = C * rayValue;
         vec4 pixelColour = imageLoad(target, px);
-        pixelColour.a = clamp(pixelColour.a, 0.0, 1.0);
         pixelColour += vec4(rayColour, rayValue);
         imageStore(target, px, pixelColour);
 

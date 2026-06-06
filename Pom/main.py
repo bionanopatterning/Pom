@@ -23,6 +23,7 @@ def main():
     commands["list_sources"] = subparsers.add_parser('list_sources', help='List all configured source directories.')
 
     commands["remove_source"] = subparsers.add_parser("remove_source", help="Remove tomogram and/or segmentation source directories.")
+    commands["remove_source"].add_argument('index', type=int, nargs='?', default=None, help='Source number to remove (as shown by list_sources, tomograms numbered first then segmentations). If given, --tomograms/--segmentations are ignored.')
     commands["remove_source"].add_argument('--tomograms', required=False, help='Path to tomogram directory')
     commands["remove_source"].add_argument('--segmentations', required=False, help='Path to segmentation directory')
 
@@ -61,7 +62,7 @@ def main():
     elif args.command == 'add_source':
         tools.add_source(args.tomograms, args.segmentations)
     elif args.command == 'remove_source':
-        tools.remove_source(args.tomograms, args.segmentations)
+        tools.remove_source(args.tomograms, args.segmentations, index=args.index)
     elif args.command == 'list_sources':
         tools.list_sources()
     elif args.command == 'summarize':
