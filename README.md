@@ -7,15 +7,17 @@
 
 # Pom
 
-**Curation, visualization, & contextualization for large scale cryoET**
+**Curation, visualization, & contextualization for large scale cryoET.** Pom is a simple CLI plus a browser-based app for exploring and organising large cryoET datasets. Initialize a database with `pom initialize`, add data sources with `pom add_source --tomograms warp_tiltseries/reconstruction/` and `pom add_source --segmentations segmented/`, then fill the database with `pom summarize`, generate projection images with `pom projections`, 3D visualizations with `pom render`, and launch the app with `pom browse`. Or run `pom auto` after setting up the sources to do it all at once. For a dataset of 100 tomograms and 3 segmented features per tomo, this should take around 2 - 5 minutes.
+
+Once inside the browser app, you can compile data subsets (which can directly be used in Ais, easymode, and WarpTools), change the visualisation settings, and explore the dataset. If you've registered both a tomogram source and a segmentation source, you can run `pom contextualize --starfile particles.star --samplers <see docs>` to take measurements of particles' context. Examples are distances to membranes, whether particles are inside some compartment, or the distance to the lamella surface. See the tutorials at https://mgflast.github.io/easymode/user_guide more details.
 
 
 ## Gallery ##
 ### Pom database browser ###
 
-<video src="https://github.com/bionanopatterning/Pom/raw/main/docs/res/pom_database_1.mp4" controls muted width="100%"><a href="https://github.com/bionanopatterning/Pom/raw/main/docs/res/pom_database_1.mp4">Watch: pom_database_1.mp4</a></video>
+https://github.com/user-attachments/assets/39aa4768-e06b-4083-ba45-288d582c6a7d
 
-<video src="https://github.com/bionanopatterning/Pom/raw/main/docs/res/pom_database_2.mp4" controls muted width="100%"><a href="https://github.com/bionanopatterning/Pom/raw/main/docs/res/pom_database_2.mp4">Watch: pom_database_2.mp4</a></video>
+https://github.com/user-attachments/assets/17d42bc4-c638-4d00-b1f4-40cc887bf5f2
 
 ### Links
 
@@ -28,3 +30,4 @@
   <a href="https://github.com/mgflast/easymode"><img src="https://github.com/mgflast/easymode/raw/master/assets/easymode_banner.png" width="49%"></a>
 </p>
 
+Mart So-Last, 2026 | mgflast@gmail.com 
