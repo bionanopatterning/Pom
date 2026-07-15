@@ -1,4 +1,4 @@
-import os, json, glob
+import os, json, glob, re
 import pandas as pd
 import starfile
 import mrcfile
@@ -203,6 +203,72 @@ def get_segmentation_for_tomogram(tomo, feature):
             return path
     return None
 
+def collect_tomogram_names(config):
+    """Collapse the tomogram sources into unique tomogram identities. A tomogram's
+    identity is its filename, so the same name appearing in several sources (e.g. raw +
+    denoised) is one tomogram with multiple flavours. Additional sources are only
+    'flavours' insofar as their names actually overlap an existing tomogram; a source
+    holding a disjoint set of names simply contributes more tomograms. Returns
+    (unique_names, n_volume_files, max_flavours): the de-duplicated names (in first-seen
+    order), the total number of .mrc files scanned, and the largest number of sources
+    any single tomogram appears in (1 = no flavour overlap at all)."""
+    names = []
+    counts = {}
+    n_files = 0
+    for src in config['tomogram_sources']:
+        for t in glob.glob(os.path.join(src, '*.mrc')):
+            n_files += 1
+            name = str(os.path.splitext(os.path.basename(t))[0])
+            if name not in counts:
+                counts[name] = 0
+                names.append(name)
+            counts[name] += 1
+    max_flavours = max(counts.values()) if counts else 0
+    return names, n_files, max_flavours
+
+def describe_tomogram_count(n_unique, n_files, max_flavours):
+    """Human-readable count that distinguishes unique tomograms from flavour volumes.
+    Only mentions flavours when tomogram names actually overlap across sources
+    (n_files > n_unique); otherwise reports the plain tomogram count."""
+    if n_files == n_unique:
+        return f"{n_unique} tomograms"
+    return f"{n_unique} tomograms ({n_files} volume files, up to {max_flavours} flavours each)"
+
+def source_subset_name(src):
+    """Derive a subset name for a tomogram source directory. The name starts at the first
+    'dataset' folder in the path (digits + underscore, e.g. '001_HELA') and joins every
+    component from there to the end with underscores. If no dataset folder is present, the
+    last two path components are used instead. Examples:
+        a/b/c/d/001_HELA/denoised                     -> 001_HELA_denoised
+        e/f/g/h/002_TEMP/warp_tiltseries/reconstruction -> 002_TEMP_warp_tiltseries_reconstruction"""
+    parts = [p for p in re.split(r'[\\/]+', os.path.normpath(src)) if p and p != '.']
+    if not parts:
+        return 'source'
+    start = next((i for i, p in enumerate(parts) if re.match(r'^\d+_', p)), None)
+    chosen = parts[start:] if start is not None else parts[-2:]
+    label = '_'.join(_sanitize_source_label(p) for p in chosen)
+    return label or 'source'
+
+def create_source_subsets(config):
+    """When multiple tomogram sources are configured, (re)generate one subset per source
+    directory, named via `source_subset_name` and listing that directory's tomograms.
+    No-op for a single source. Returns a list of (subset_name, n_tomograms) created."""
+    sources = config['tomogram_sources']
+    if len(sources) < 2:
+        return []
+    subsets_dir = os.path.join('pom', 'subsets')
+    os.makedirs(subsets_dir, exist_ok=True)
+    created = []
+    for src in sources:
+        name = source_subset_name(src)
+        paths = sorted(glob.glob(os.path.join(src, '*.mrc')))
+        if not paths:
+            continue
+        with open(os.path.join(subsets_dir, f'{name}.txt'), 'w') as f:
+            f.write('\n'.join(paths) + '\n')
+        created.append((name, len(paths)))
+    return created
+
 def list_sources():
     """Print all configured sources with a unified 1-based index spanning tomograms
     first then segmentations. The index is what `pom remove_source N` consumes."""
@@ -216,13 +282,19 @@ def list_sources():
         n_mrc = len(glob.glob(os.path.join(src, '*.mrc')))
         print(f"  {n}. {src} - {n_mrc} .mrc files")
         n += 1
+    if len(config['tomogram_sources']) > 1:
+        tomo_names, n_files, max_flavours = collect_tomogram_names(config)
+        if n_files == len(tomo_names):
+            print(f"  -> {len(tomo_names)} unique tomograms, {n_files} volume files (no flavour overlap)")
+        else:
+            print(f"  -> {len(tomo_names)} unique tomograms, {n_files} volume files (up to {max_flavours} flavours each)")
 
     print("\nSegmentation sources:")
     if not config['segmentation_sources']:
         print("  (none)")
     for src in config['segmentation_sources']:
-        n_mrc = len(glob.glob(os.path.join(src, '*.mrc')))
-        print(f"  {n}. {src} - {n_mrc} .mrc files")
+        n_seg = len(glob.glob(os.path.join(src, '*__*.mrc')))
+        print(f"  {n}. {src} - {n_seg} segmentation volumes")
         n += 1
     print()
 
@@ -325,47 +397,38 @@ def summarize(overwrite=True, target_feature=None):
     config = get_config()
     summary_path = os.path.join('pom', 'summary.star')
 
-    tomograms = []
-    for src in config['tomogram_sources']:
-        tomograms.extend(glob.glob(os.path.join(src, '*.mrc')))
+    tomo_names, n_files, max_flavours = collect_tomogram_names(config)
 
-    print(f"Found {len(tomograms)} tomograms")
-
-    if len(tomograms) == 0:
+    if len(tomo_names) == 0:
         print("No tomograms found.")
         return
 
-    # Count total segmentation volumes
+    # Count total segmentation volumes (linked to tomograms by name, so per unique tomogram).
     feature_key = "*" if target_feature is None else f'{target_feature}'
     total_segmentations = 0
-    for tomo_path in tomograms:
-        tomo_name = str(os.path.splitext(os.path.basename(tomo_path))[0])
+    for tomo_name in tomo_names:
         for src in config['segmentation_sources']:
             pattern = os.path.join(src, f'{tomo_name}__{feature_key}.mrc')
             total_segmentations += len(glob.glob(pattern))
 
-    print(f"Found {len(tomograms)} tomograms, {total_segmentations} segmentation volumes.")
+    print(f"Found {describe_tomogram_count(len(tomo_names), n_files, max_flavours)}, {total_segmentations} segmentation volumes.")
 
     if not os.path.exists(summary_path) or overwrite:
-        tomo_names = [str(os.path.splitext(os.path.basename(t))[0]) for t in tomograms]
         df = pd.DataFrame(index=tomo_names)
         df.index.name = 'tomogram'
     else:
         df = starfile.read(summary_path, parse_as_string=["tomogram"])
         df = df.set_index('tomogram')
         df.index = df.index.astype(str)
-        current_names = {str(os.path.splitext(os.path.basename(t))[0]) for t in tomograms}
+        current_names = set(tomo_names)
         df = df[df.index.isin(current_names)] # remove entries from now-missing sources or tomograms
-        for t in tomograms:
-            name = str(os.path.splitext(os.path.basename(t))[0])
+        for name in tomo_names:
             if name not in df.index:
                 df.loc[name] = np.nan
 
     tasks = []
     feature_key = "*" if target_feature is None else f'{target_feature}'
-    for tomo_path in tomograms:
-        tomo_name = str(os.path.splitext(os.path.basename(tomo_path))[0])
-
+    for tomo_name in tomo_names:
         segmentations = {}
         for src in config['segmentation_sources']:
             pattern = os.path.join(src, f'{tomo_name}__{feature_key}.mrc')
@@ -405,6 +468,12 @@ def summarize(overwrite=True, target_feature=None):
     df_to_write['tomogram'] = df_to_write['tomogram'].astype(str)
     starfile.write(df_to_write, summary_path)
     print(f"\nSummary saved at {summary_path}")
+
+    # With multiple tomogram sources, keep a per-source subset in sync with each directory.
+    source_subsets = create_source_subsets(config)
+    if source_subsets:
+        print(f"Updated {len(source_subsets)} per-source subsets: " +
+              ", ".join(f"{name} ({n})" for name, n in source_subsets))
 
     # update feature library.
     df_columns = set(df.columns)
@@ -477,6 +546,34 @@ def summarize_star(star_path, tomo_col=None, column_name=None, substitutions=Non
     starfile.write(df_to_write, summary_path)
     print(f'Added column "{col_name}" to {summary_path} ({sum(counts.values())} particles across {len(counts)} tomograms)')
 
+def _sanitize_source_label(name):
+    """Turn an arbitrary directory name into an identifier safe for filesystem paths
+    and UI option strings (alphanumerics only, runs of anything else -> '_')."""
+    label = re.sub(r'[^A-Za-z0-9]+', '_', name).strip('_')
+    return label or 'src'
+
+def density_dirnames(sources):
+    """Map each tomogram source to the image subdir holding its central-slice ('density')
+    images. The first source is the main one and keeps the bare name 'density'; every
+    additional source becomes 'density_<sanitized basename>', de-duplicated with a numeric
+    suffix when two sources share a basename. Returns a list parallel to `sources`."""
+    names = []
+    used = set()
+    for i, src in enumerate(sources):
+        if i == 0:
+            name = 'density'
+        else:
+            base = _sanitize_source_label(os.path.basename(os.path.normpath(src)))
+            name = f'density_{base}'
+            if name in used:
+                n = 2
+                while f'{name}_{n}' in used:
+                    n += 1
+                name = f'{name}_{n}'
+        used.add(name)
+        names.append(name)
+    return names
+
 def _process_projection(args):
     from PIL import Image
     file_path, output_path, is_tomogram = args
@@ -513,10 +610,11 @@ def projections(overwrite=False):
 
     tasks = []
 
-    for src in config['tomogram_sources']:
+    density_dirs = density_dirnames(config['tomogram_sources'])
+    for src, subdir in zip(config['tomogram_sources'], density_dirs):
         for tomo_path in glob.glob(os.path.join(src, '*.mrc')):
             tomo_name = os.path.splitext(os.path.basename(tomo_path))[0]
-            output_path = os.path.join('pom', 'images', 'density', f'{tomo_name}.png')
+            output_path = os.path.join('pom', 'images', subdir, f'{tomo_name}.png')
             if overwrite or not os.path.exists(output_path):
                 tasks.append((tomo_path, output_path, True))
 
@@ -617,7 +715,7 @@ def _build_renderables(features_to_render, tomo_name, config, feature_library, s
     return renderables
 
 
-def _render_worker(tomo_paths, df, config, feature_library, compositions, overwrite, counter, lock):
+def _render_worker(tomo_names, df, config, feature_library, compositions, overwrite, counter, lock):
     """Worker process that creates ONE renderer and processes all assigned tomograms."""
     from Pom.core.render import Renderer, VolumeModel
     from PIL import Image
@@ -625,8 +723,7 @@ def _render_worker(tomo_paths, df, config, feature_library, compositions, overwr
     try:
         renderer = Renderer(image_size=RENDER_IMAGE_SIZE)
 
-        for tomo_path in tomo_paths:
-            tomo_name = os.path.splitext(os.path.basename(tomo_path))[0]
+        for tomo_name in tomo_names:
 
             if tomo_name not in df.index:
                 with lock:
@@ -708,12 +805,10 @@ def render(overwrite=False):
     for comp_name in compositions.keys():
         os.makedirs(os.path.join('pom', 'images', comp_name), exist_ok=True)
 
-    tomograms = []
-    for src in config['tomogram_sources']:
-        tomograms.extend(glob.glob(os.path.join(src, '*.mrc')))
+    tomograms, n_files, max_flavours = collect_tomogram_names(config)
 
     parallel_processes = min(os.cpu_count(), 16)
-    print(f"Rendering {len(tomograms)} tomograms in {len(compositions)} {'composition' if len(compositions) == 1 else 'compositions'} with {parallel_processes} workers...")
+    print(f"Rendering {describe_tomogram_count(len(tomograms), n_files, max_flavours)} in {len(compositions)} {'composition' if len(compositions) == 1 else 'compositions'} with {parallel_processes} workers...")
 
     spinning = [name for name, comp in compositions.items() if composition_spin(comp)]
     if spinning:
@@ -723,8 +818,8 @@ def render(overwrite=False):
 
     # Divide tomograms among processes
     process_div = {p: [] for p in range(parallel_processes)}
-    for p, tomo_path in zip(itertools.cycle(range(parallel_processes)), tomograms):
-        process_div[p].append(tomo_path)
+    for p, tomo_name in zip(itertools.cycle(range(parallel_processes)), tomograms):
+        process_div[p].append(tomo_name)
 
     # Create shared counter and lock for progress tracking
     manager = multiprocessing.Manager()
@@ -799,6 +894,245 @@ def _bin_volume(vol, b):
     d, h, w = vol.shape
     d, h, w = (d // b) * b, (h // b) * b, (w // b) * b
     return vol[:d, :h, :w].reshape(d // b, b, h // b, b, w // b, b).mean(axis=(1, 3, 5))
+
+
+def _remove_dust(binary, dust_value, apix):
+    """Remove connected components from a binary volume.
+
+    dust_value > 0: drop components smaller than dust_value cubic Angstrom.
+    dust_value < 0: keep only the -dust_value largest components.
+    dust_value == 0: no-op."""
+    if dust_value == 0.0 or not binary.any():
+        return binary
+    labeled, n = ndimage.label(binary)
+    if n == 0:
+        return binary
+    sizes = ndimage.sum(binary, labeled, range(1, n + 1))
+    out = binary.copy()
+    if dust_value < 0:
+        keep_n = int(-dust_value)
+        if keep_n < n:
+            threshold_size = sorted(sizes, reverse=True)[keep_n - 1]
+            for i, sz in enumerate(sizes):
+                if sz < threshold_size:
+                    out[labeled == (i + 1)] = False
+    else:
+        min_voxels = int(np.ceil(dust_value / (apix ** 3)))
+        for i, sz in enumerate(sizes):
+            if sz < min_voxels:
+                out[labeled == (i + 1)] = False
+    return out
+
+
+def _build_sampler_mask(sampler, tomo_name, apix):
+    """Build a boolean mask volume for one sampler applied to one tomogram.
+
+    sampler: (feature, sigma_A, threshold, dust, subtract) -- gaussian-smooth the segmentation
+    by sigma_A (Angstrom, 0 = no smoothing), threshold at `threshold` (0..1), optionally remove
+    per-feature dust (positive A^3 = min component size, negative N = keep N largest).
+    Returns None if the segmentation file is missing."""
+    feature, sigma_A, threshold, dust, _subtract = sampler
+    seg_path = get_segmentation_for_tomogram(tomo_name, feature)
+    if seg_path is None:
+        return None
+    seg = mrcfile.read(seg_path)
+    norm = 127 if seg.dtype == np.int8 else 255 if seg.dtype == np.uint16 else 1.0
+    seg_f = seg.astype(np.float32) / norm
+
+    if sigma_A > 0:
+        sigma_vox = sigma_A / max(apix, 1.0)
+        seg_f = ndimage.gaussian_filter(seg_f, sigma=sigma_vox)
+
+    binary = seg_f >= threshold
+    if dust != 0.0:
+        binary = _remove_dust(binary, dust, apix)
+    return binary
+
+
+def _create_mask_for_tomogram(tomo_name, samplers_parsed, final_dust=0.0):
+    """Assemble the per-tomogram mask. Returns (mask_bool_array, apix) or (None, apix)."""
+    tomogram_path = get_tomogram_by_name(tomo_name)
+    apix = None
+    if tomogram_path is not None:
+        with mrcfile.open(tomogram_path, header_only=True, permissive=True) as mrc:
+            apix = float(mrc.voxel_size.x)
+
+    mask = None
+    for sampler in samplers_parsed:
+        # Need apix to translate Angstrom to voxels; fall back to segmentation apix if needed.
+        if apix is None or apix == 0:
+            seg_path = get_segmentation_for_tomogram(tomo_name, sampler[1])
+            if seg_path is None:
+                continue
+            with mrcfile.open(seg_path, header_only=True, permissive=True) as mrc:
+                apix = float(mrc.voxel_size.x) or 1.0
+
+        m = _build_sampler_mask(sampler, tomo_name, apix)
+        if m is None:
+            continue
+        if mask is None:
+            mask = np.zeros(m.shape, dtype=bool)
+        if m.shape != mask.shape:
+            print(f"  {tomo_name}: skipping {sampler[1]} - shape {m.shape} != mask shape {mask.shape}")
+            continue
+        if sampler[4]:  # subtract
+            mask &= ~m
+        else:
+            mask |= m
+
+    if mask is not None and final_dust != 0.0:
+        mask = _remove_dust(mask, final_dust, apix or 1.0)
+
+    return mask, apix
+
+
+def _create_mask_worker(tomo_batch, name, samplers_parsed, output_dir, final_dust, overwrite, counter, lock):
+    for tomo_name in tomo_batch:
+        try:
+            output_path = os.path.join(output_dir, f'{tomo_name}__{name}.mrc')
+            if not overwrite and os.path.exists(output_path):
+                continue
+            mask, apix = _create_mask_for_tomogram(tomo_name, samplers_parsed, final_dust=final_dust)
+            if mask is None or not mask.any():
+                continue
+            # Save as int8 (0 / 127) matching Ais' segmentation convention so the masks
+            # directory can be added as a segmentation source and reused.
+            data = (mask.astype(np.int8) * 127)
+            with mrcfile.new(output_path, overwrite=True) as mrc:
+                mrc.set_data(data)
+                if apix and apix > 0:
+                    mrc.voxel_size = apix
+        except Exception as e:
+            print(f'Error processing {tomo_name}: {e}')
+        finally:
+            with lock:
+                counter.value += 1
+
+
+def _resolve_subset_or_tomogram(arg):
+    """Resolve a --subset value: if pom/subsets/<arg>.txt exists, return its tomogram
+    names (parsed from path-or-name entries). Otherwise treat arg as a single tomo name."""
+    subset_path = os.path.join('pom', 'subsets', f'{arg}.txt')
+    if os.path.isfile(subset_path):
+        names = []
+        with open(subset_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                base = line.replace('\\', '/').rsplit('/', 1)[-1]
+                if base.endswith('.mrc'):
+                    base = base[:-4]
+                names.append(base)
+        return names, True
+    return [arg], False
+
+
+def create_mask(name, samplers, output_dir=None, dust=0.0, subset=None, workers=None, overwrite=False):
+    """Save a binary mask per tomogram, derived from segmentation features via samplers."""
+    import itertools, multiprocessing, time
+
+    # Parse samplers (with optional ! prefix for subtraction).
+    # Form: feature:sigma:threshold or feature:sigma:threshold:dust
+    samplers_parsed = []
+    for s in samplers:
+        subtract = s.startswith('!')
+        body = s[1:] if subtract else s
+        parts = body.split(':')
+        try:
+            if len(parts) == 3:
+                samplers_parsed.append((parts[0], float(parts[1]), float(parts[2]), 0.0, subtract))
+            elif len(parts) == 4:
+                samplers_parsed.append((parts[0], float(parts[1]), float(parts[2]), float(parts[3]), subtract))
+            else:
+                print(f'Invalid sampler "{s}": expected feature:sigma:threshold or feature:sigma:threshold:dust')
+                return
+        except ValueError as e:
+            print(f'Could not parse sampler "{s}": {e}')
+            return
+
+    if not samplers_parsed:
+        print('No valid samplers.')
+        return
+
+    config = get_config()
+    if not config.get('segmentation_sources'):
+        print('No segmentation source configured. Run "pom add_source -s <path>" first.')
+        return
+
+    if output_dir is None:
+        output_dir = 'masks'
+    os.makedirs(output_dir, exist_ok=True)
+
+    subset_source = None
+    if subset:
+        tomograms, from_subset_file = _resolve_subset_or_tomogram(subset)
+        subset_source = f"subset '{subset}'" if from_subset_file else f"tomogram '{subset}'"
+    else:
+        tomos = set()
+        for src in config.get('tomogram_sources', []):
+            for p in glob.glob(os.path.join(src, '*.mrc')):
+                tomos.add(os.path.splitext(os.path.basename(p))[0])
+        # Also include any tomograms that only show up in segmentation sources.
+        for src in config['segmentation_sources']:
+            for p in glob.glob(os.path.join(src, '*__*.mrc')):
+                tomos.add(os.path.basename(p).split('__', 1)[0])
+        tomograms = sorted(tomos)
+
+    if not tomograms:
+        print('No tomograms found.')
+        return
+
+    scope = f" ({subset_source})" if subset_source else ""
+    print(f"\nCreating mask '{name}' for {len(tomograms)} tomogram(s){scope} with {len(samplers_parsed)} sampler(s):")
+    for i, s in enumerate(samplers_parsed, 1):
+        feature, sigma_A, threshold, dust_f, subtract = s
+        op = 'SUBTRACT' if subtract else 'include'
+        sigma_str = f", σ={sigma_A:.1f} Å" if sigma_A > 0 else ""
+        dust_str = ''
+        if dust_f != 0.0:
+            dust_str = f", keep {int(-dust_f)} largest" if dust_f < 0 else f", drop blobs < {dust_f:.2e} Å³"
+        print(f"  {i}. {op}: {feature} >= {threshold}{sigma_str}{dust_str}")
+    if dust != 0.0:
+        if dust < 0:
+            print(f"  Final: keep {int(-dust)} largest connected component(s)")
+        else:
+            print(f"  Final: drop components < {dust:.2e} Å³")
+    print(f"  Output: {output_dir}/<tomo>__{name}.mrc\n")
+
+    parallel_processes = workers if workers is not None else min(os.cpu_count(), 16)
+    process_div = {p: [] for p in range(parallel_processes)}
+    for p, tomo in zip(itertools.cycle(range(parallel_processes)), tomograms):
+        process_div[p].append(tomo)
+
+    manager = multiprocessing.Manager()
+    counter = manager.Value('i', 0)
+    lock = manager.Lock()
+
+    print(f'Processing with {parallel_processes} workers...')
+    with multiprocessing.Pool(processes=parallel_processes) as pool:
+        async_results = [
+            pool.apply_async(
+                _create_mask_worker,
+                (process_div[p], name, samplers_parsed, output_dir, dust, overwrite, counter, lock),
+            )
+            for p in range(parallel_processes)
+        ]
+        with tqdm(total=len(tomograms)) as pbar:
+            last_value = 0
+            while any(not r.ready() for r in async_results):
+                current_value = counter.value
+                if current_value > last_value:
+                    pbar.update(current_value - last_value)
+                    last_value = current_value
+                time.sleep(0.1)
+            current_value = counter.value
+            if current_value > last_value:
+                pbar.update(current_value - last_value)
+        for r in async_results:
+            r.get()
+
+    print('Mask creation complete.')
 
 
 def _distance_to_surface(segmentation_volume, normalization_value, threshold, dust_angstrom3, apix, coordinates, binning=1):

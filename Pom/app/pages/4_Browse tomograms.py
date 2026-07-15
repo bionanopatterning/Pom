@@ -3,9 +3,10 @@ import pandas as pd
 import os
 from PIL import Image
 import numpy as np
-import glob
 import json
-from Pom.app.util import load_data, get_image
+from Pom.app.util import (load_data, get_image, density_options, list_subsets,
+                          read_subset, add_to_subset, remove_from_subset,
+                          subset_tomo_name as _tomo_name_from_entry)
 from Pom.core.tools import get_tomogram_by_name
 
 st.set_page_config(
@@ -14,54 +15,6 @@ st.set_page_config(
 )
 
 os.makedirs(os.path.join("pom", "subsets"), exist_ok=True)
-
-def _tomo_name_from_entry(entry):
-    """Return the bare tomogram name from a subset entry (full path or plain name)."""
-    base = entry.replace('\\', '/').rsplit('/', 1)[-1]
-    if base.endswith('.mrc'):
-        return base[:-4]
-    return base
-
-def _migrate_subset_to_full_paths(subset_path, entries):
-    # backwards compatibility (260331): rewrite plain tomo names to full paths on first read
-    needs_migration = any('/' not in e and '\\' not in e for e in entries)
-    if not needs_migration:
-        return entries
-    migrated = []
-    for e in entries:
-        if '/' not in e and '\\' not in e:
-            migrated.append(get_tomogram_by_name(e) or e)
-        else:
-            migrated.append(e)
-    with open(subset_path, 'w') as f:
-        f.write('\n'.join(migrated) + '\n')
-    return migrated
-
-def read_subset(subset):
-    subset_path = os.path.join("pom", "subsets", f"{subset}.txt")
-    if os.path.exists(subset_path):
-        entries = [t for t in open(subset_path).read().splitlines() if t.strip()]
-        return _migrate_subset_to_full_paths(subset_path, entries)
-    else:
-        return []
-
-def add_to_subset(subset, tomo):
-    from Pom.core.tools import get_tomogram_by_name
-    subset_path = os.path.join("pom", "subsets", f"{subset}.txt")
-    full_path = get_tomogram_by_name(tomo) or tomo
-    tomos = read_subset(subset)
-    if tomo not in [_tomo_name_from_entry(t) for t in tomos]:
-        tomos.append(full_path)
-        with open(subset_path, 'w') as f:
-            f.write('\n'.join(tomos) + '\n')
-
-def remove_from_subset(subset, tomo):
-    subset_path = os.path.join("pom", "subsets", f"{subset}.txt")
-    if os.path.exists(subset_path):
-        tomos = read_subset(subset)
-        tomos = [t for t in tomos if _tomo_name_from_entry(t) != tomo]
-        with open(subset_path, 'w') as f:
-            f.write('\n'.join(tomos) + '\n')
 
 def create_subset():
     name = st.session_state.new_subset_name.strip()
@@ -82,6 +35,9 @@ else:
 # Set default composition display
 if 'composition_display' not in st.session_state:
     st.session_state.composition_display = 'thumbnail' if 'thumbnail' in available_compositions else (available_compositions[0] if available_compositions else 'thumbnail')
+
+# Set default density (central-slice) flavour
+st.session_state.setdefault('density_display', 'density')
 
 def _get_cmd_path():
     ais_settings = os.path.join(os.path.expanduser("~"), ".Ais", "settings.txt")
@@ -126,7 +82,7 @@ if "tomo_id" in st.query_params:
         st.warning(f"Tomogram '{requested}' not found — showing '{tomo_name}' instead.")
 
 
-tomo_subsets = sorted([os.path.splitext(os.path.basename(j))[0] for j in glob.glob(os.path.join("pom", "subsets", "*.txt"))])
+tomo_subsets = list_subsets()
 
 tomo_names = df.index.tolist()
 _, column_base, _ = st.columns([1, 15, 1])
@@ -186,8 +142,18 @@ with column_base:
 
     cols = st.columns([1, 1])
     with cols[0]:
-        img = get_image(tomo_name, "density").transpose(Image.FLIP_TOP_BOTTOM)
+        density_opts = density_options()
+        if st.session_state.density_display not in density_opts:
+            st.session_state.density_display = 'density'
+        img = get_image(tomo_name, st.session_state.density_display).transpose(Image.FLIP_TOP_BOTTOM)
         st.image(img, caption='Central slice', width="stretch")
+        if len(density_opts) > 1:
+            st.selectbox(
+                "Density",
+                density_opts,
+                key="density_display",
+                label_visibility="collapsed"
+            )
     with cols[1]:
         img = get_image(tomo_name, st.session_state.composition_display)
         st.image(img, caption=st.session_state.composition_display, width="stretch")

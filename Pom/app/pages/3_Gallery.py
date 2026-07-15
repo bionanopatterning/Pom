@@ -3,7 +3,7 @@ import os
 import glob
 import json
 from urllib.parse import quote
-from Pom.app.util import load_data, get_image
+from Pom.app.util import load_data, get_image, density_options
 from PIL import Image
 
 st.set_page_config(
@@ -63,7 +63,7 @@ with controls[1]:
 
 # Display option
 with controls[2]:
-    options = ['density'] + compositions + [f'{o}_projection' for o in list(df.columns)]
+    options = density_options() + compositions + [f'{o}_projection' for o in list(df.columns)]
     st.selectbox("Display option", options, key="display_option")
 
 # Sort column selector (NEW)

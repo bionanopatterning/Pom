@@ -55,6 +55,15 @@ def main():
     commands["contextualize"].add_argument('--binning', type=int, default=1, help='Bin segmentation volumes before computing distance maps (default 1). Higher values (2, 3, 4) speed up distance samplers with marginal accuracy loss.')
     commands["contextualize"].add_argument('--workers', type=int, default=None, help='Number of parallel workers (default: min(cpu_count, 32)).')
 
+    commands["create_mask"] = subparsers.add_parser("create_mask", help="Save a binary mask per tomogram, derived from segmentation features.")
+    commands["create_mask"].add_argument('--name', type=str, required=True, help='Mask name. Output files: <output-dir>/<tomo>__<name>.mrc.')
+    commands["create_mask"].add_argument('--samplers', type=str, nargs='+', required=True, help='One or more samplers (combined as union; prefix with "!" to subtract instead). Form: "feature:sigma:threshold" (3 parts) or "feature:sigma:threshold:dust" (4 parts, optional per-feature dust). sigma is 3D Gaussian smoothing applied to the segmentation before thresholding, in Ångström (use 0 for no smoothing). threshold is 0..1. Per-feature dust: positive Å³ = minimum component size; negative N = keep only the N largest components.')
+    commands["create_mask"].add_argument('--output-dir', type=str, default=None, help='Output directory (default: masks).')
+    commands["create_mask"].add_argument('--dust', type=float, default=0.0, help='Dust removal on the final assembled mask (Å³ minimum component size, or negative N = keep N largest components).')
+    commands["create_mask"].add_argument('--subset', type=str, default=None, help='Restrict processing to a subset of tomograms. Accepts either the name of a Pom subset (pom/subsets/<name>.txt) or a single tomogram name (without .mrc). If a subset file with that name exists it wins; otherwise treated as a single tomogram. If omitted, processes all tomograms found in tomogram/segmentation sources.')
+    commands["create_mask"].add_argument('--workers', type=int, default=None, help='Number of parallel workers (default: min(cpu_count, 16)).')
+    commands["create_mask"].add_argument('--overwrite', action='store_true', help='Overwrite existing mask files.')
+
     args = parser.parse_args()
 
     if args.command == 'initialize':
@@ -76,7 +85,11 @@ def main():
     elif args.command == 'projections':
         tools.projections(args.overwrite)
     elif args.command == 'render':
+        if not args.overwrite:
+            print("To update existing images, remember to include the flag `--overwrite`.")
         tools.render(args.overwrite)
+    elif args.command == 'create_mask':
+        tools.create_mask(args.name, args.samplers, output_dir=args.output_dir, dust=args.dust, subset=args.subset, workers=args.workers, overwrite=args.overwrite)
     elif args.command == 'contextualize':
         if not os.path.exists(args.starfile):
             print(f'Star file {args.starfile} not found.')
