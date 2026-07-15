@@ -7,8 +7,6 @@
 
 # Pom
 
-![Pom](pom_header.png)
-
 **Curation, visualization, & contextualization for large scale cryoET**
 
 
