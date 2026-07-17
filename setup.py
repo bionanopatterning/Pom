@@ -29,7 +29,10 @@ setup(
         "starfile",
         "tqdm",
         "mrcfile",
-        "scipy"
+        "scipy",
+        "glfw",
+        "pyopengl",
+        "skimage"
     ]
 )
 
