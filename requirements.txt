@@ -6,3 +6,6 @@ starfile
 streamlit
 streamlit-aggrid
 matplotlib
+skimage
+pyopengl
+glfw
