@@ -32,7 +32,7 @@ setup(
         "scipy",
         "glfw",
         "pyopengl",
-        "skimage"
+        "scikit-image"
     ]
 )
 
